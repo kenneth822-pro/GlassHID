@@ -1,0 +1,15 @@
+# Gradle and Android build output
+.gradle/
+build/
+local.properties
+captures/
+*.apk
+*.aab
+
+# IDE files
+.idea/
+*.iml
+
+# Python
+__pycache__/
+*.pyc

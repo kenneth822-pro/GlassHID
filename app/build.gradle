@@ -2,6 +2,9 @@ plugins {
     id 'com.android.application'
 }
 
+// Release signing comes from CI secrets (see README); without them only debug builds are made.
+def releaseStore = System.getenv('GLASSHID_KEYSTORE_FILE')
+
 android {
     namespace 'com.nido.a05sinput'
     compileSdk 35
@@ -10,7 +13,70 @@ android {
         applicationId 'com.nido.a05sinput'
         minSdk 28
         targetSdk 34
-        versionCode 3
-        versionName '1.2.0'
+        versionCode 7
+        versionName '2.0.0'
     }
+
+    signingConfigs {
+        // A committed debug key gives every CI build the same signature, so a new APK
+        // installs over the previous one instead of forcing an uninstall.
+        debug {
+            storeFile file('debug.keystore')
+            storeType 'pkcs12'
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+        if (releaseStore) {
+            release {
+                storeFile file(releaseStore)
+                storePassword System.getenv('GLASSHID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('GLASSHID_KEY_ALIAS')
+                keyPassword System.getenv('GLASSHID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (releaseStore) signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            all {
+                maxHeapSize = '2g'
+                testLogging {
+                    events 'failed'
+                    exceptionFormat 'full'
+                }
+            }
+        }
+    }
+
+    lint {
+        // CI fails on any call to an API newer than minSdk without a version check.
+        checkOnly.add('NewApi')
+        abortOnError true
+        checkReleaseBuilds false
+    }
+
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            outputFileName = "GlassHID-${variant.versionName}-${variant.buildType.name}.apk"
+        }
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
 }
