@@ -613,6 +613,8 @@ final class AnkiRemote implements GlassHid.Listener, StudyCoach.Listener,
             toast("Pocket mode off");
         } else if (runtime.mode() != GlassHid.MODE_BLUETOOTH) {
             toast("Pocket mode works over Bluetooth. Switch the mode to BT first.");
+        } else if (!runtime.bluetooth().hasPermission()) {
+            toast("Allow Nearby devices for GlassHID first (SET ▾ → SETUP GUIDE).");
         } else if (runtime.pocket.start()) {
             toast("Pocket mode on: lock the screen and keep reviewing with the volume keys. "
                     + "It ends after 20 minutes without a press.");

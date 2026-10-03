@@ -192,6 +192,11 @@ final class GlassHid {
         usbLink = link;
     }
 
+    /** Clears the link only if it is still {@code link}; a newer activity may own it now. */
+    void clearUsbLink(UsbLink link) {
+        if (usbLink == link) usbLink = null;
+    }
+
     boolean usbConnected() {
         UsbLink link = usbLink;
         return link != null && link.connected();

@@ -76,6 +76,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     private AnkiRemote ankiRemote;
     private SetupGuide setupGuide;
     private UsbBridgeServer usb;
+    private GlassHid.UsbLink usbLink;
     private FeedbackController feedback;
     private NeoUi neoUi;
     private ControllerPanel controllerPanel;
@@ -156,7 +157,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
                 runtime.notifyChanged();
             }
         });
-        runtime.setUsbLink(new GlassHid.UsbLink() {
+        usbLink = new GlassHid.UsbLink() {
             @Override public boolean connected() {
                 return usb.hasClients();
             }
@@ -164,7 +165,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             @Override public void send(String line) {
                 usb.send(line);
             }
-        });
+        };
+        runtime.setUsbLink(usbLink);
         feedback = new FeedbackController(this,
                 () -> usb.send("SOUND KEY"));
         feedback.setEnabled(hapticsOn);
@@ -225,7 +227,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     protected void onDestroy() {
         ankiRemote.release();
         setupGuide.dismiss();
-        runtime.setUsbLink(null);
+        runtime.clearUsbLink(usbLink);
         runtime.setLiveInfo(null);
         usb.close();
         // Keeps the HID link when the background service is still using it.

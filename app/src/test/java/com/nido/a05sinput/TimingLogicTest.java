@@ -90,6 +90,16 @@ public class TimingLogicTest {
         assertEquals(Result.SHORT, gesture.release(10_090));
     }
 
+    @Test public void studyStepperMovesThroughItsSteps() {
+        assertEquals(50, StudyCoach.step(StudyCoach.GOAL_STEPS, 0, 1));
+        assertEquals(0, StudyCoach.step(StudyCoach.GOAL_STEPS, 50, -1));
+        assertEquals(0, StudyCoach.step(StudyCoach.GOAL_STEPS, 0, -1));
+        assertEquals(1000, StudyCoach.step(StudyCoach.GOAL_STEPS, 1000, 1));
+        assertEquals(150, StudyCoach.step(StudyCoach.GOAL_STEPS, 120, 1));
+        assertEquals(20, StudyCoach.step(StudyCoach.FOCUS_STEPS, 25, -1));
+        assertEquals(3, StudyCoach.step(StudyCoach.BREAK_STEPS, 1, -1));
+    }
+
     @Test public void swipeClassifierReadsDirectionsAndTaps() {
         float slop = 20, min = 120;
         assertEquals(SwipeClassifier.Gesture.TAP, SwipeClassifier.classify(3, 4, 120, slop, min));

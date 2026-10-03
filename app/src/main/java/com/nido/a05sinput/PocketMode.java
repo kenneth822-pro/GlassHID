@@ -61,10 +61,10 @@ final class PocketMode {
         return session != null;
     }
 
-    /** Starts pocket mode; returns false when Bluetooth input is not on. */
+    /** Starts pocket mode; returns false unless Bluetooth input is on and permitted. */
     boolean start() {
         if (session != null) return true;
-        if (runtime.mode() != GlassHid.MODE_BLUETOOTH) return false;
+        if (runtime.mode() != GlassHid.MODE_BLUETOOTH || !runtime.bluetooth().hasPermission()) return false;
         try {
             MediaSession media = new MediaSession(runtime.app, "GlassHID pocket mode");
             media.setPlaybackToRemote(new VolumeProvider(VolumeProvider.VOLUME_CONTROL_RELATIVE, 100, 50) {
