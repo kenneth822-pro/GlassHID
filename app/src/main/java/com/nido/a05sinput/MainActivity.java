@@ -6,7 +6,6 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.content.SharedPreferences;
-import android.content.res.ColorStateList;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -25,7 +24,6 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.RadioButton;
@@ -178,7 +176,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         layoutSwitch = neoButton("GAMEPAD", BLUE);
         layoutSwitch.setOnClickListener(v -> showInputLayout(true, true));
         top.addView(layoutSwitch, new LinearLayout.LayoutParams(dp(78), dp(54)));
-        
+
         Button ankiSwitch = neoButton("ANKI", CORAL);
         ankiSwitch.setOnClickListener(v -> showAnkiLayout(true));
         top.addView(ankiSwitch, new LinearLayout.LayoutParams(dp(74), dp(54)));
@@ -348,233 +346,209 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         return button;
     }
 
-        private void showAnkiLayout(boolean announce) {
-    controllerLayout = false;
+    private void showAnkiLayout(boolean announce) {
+        controllerLayout = false;
 
-    if (controllerPanel != null) {
-        controllerPanel.releaseAll();
-        controllerPanel = null;
-    }
-
-    // Anki mode is intended to be used as the direct Bluetooth remote.
-    if (bluetoothModeButton != null) {
-        bluetoothModeButton.setChecked(true);
-    }
-
-    if (normalTopBar != null)
-        normalTopBar.setVisibility(View.VISIBLE);
-
-    if (controllerTopBar != null)
-        controllerTopBar.setVisibility(View.GONE);
-
-    if (inputContainer == null) return;
-
-    inputContainer.removeAllViews();
-
-    inputContainer.addView(
-            buildAnkiLayout(),
-            new LinearLayout.LayoutParams(-1, -1)
-    );
-
-    if (announce) {
-        Toast.makeText(
-                this,
-                "Anki review layout",
-                Toast.LENGTH_SHORT
-        ).show();
-    }
-
-    updateStatus();
-}
-
-private View buildAnkiLayout() {
-    LinearLayout outer = new LinearLayout(this);
-    outer.setOrientation(LinearLayout.HORIZONTAL);
-    outer.setPadding(0, dp(4), 0, dp(4));
-    outer.setBackgroundColor(PAPER);
-
-    // Main Anki controls
-    LinearLayout main = new LinearLayout(this);
-    main.setOrientation(LinearLayout.VERTICAL);
-    main.setPadding(0, 0, dp(5), 0);
-
-    TextView title = text("ANKI REVIEW", 18);
-    title.setTypeface(Typeface.DEFAULT_BOLD);
-    title.setGravity(Gravity.CENTER);
-    title.setTextColor(INK);
-
-    main.addView(
-            title,
-            new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    dp(32)
-            )
-    );
-
-    // FLIP
-    LinearLayout flipRow = keyboardRow();
-
-    addAnkiButton(
-            flipRow,
-            "FLIP\nSPACE",
-            YELLOW,
-            () -> sendSpecial("SPACE", 0x2C)
-    );
-
-    main.addView(flipRow, rowParams());
-
-    // 1–4 ratings
-    LinearLayout ratingRow = keyboardRow();
-
-    addAnkiButton(
-            ratingRow,
-            "AGAIN\n1",
-            CORAL,
-            () -> sendText("1")
-    );
-
-    addAnkiButton(
-            ratingRow,
-            "HARD\n2",
-            PAPER,
-            () -> sendText("2")
-    );
-
-    addAnkiButton(
-            ratingRow,
-            "GOOD\n3",
-            GREEN,
-            () -> sendText("3")
-    );
-
-    addAnkiButton(
-            ratingRow,
-            "EASY\n4",
-            BLUE,
-            () -> sendText("4")
-    );
-
-    main.addView(ratingRow, rowParams());
-
-    // Useful secondary controls
-    LinearLayout utilityRow = keyboardRow();
-
-    addAnkiButton(
-            utilityRow,
-            "UNDO\nU",
-            PAPER,
-            () -> sendText("u")
-    );
-
-    addAnkiButton(
-            utilityRow,
-            "REPLAY\nR",
-            YELLOW,
-            () -> sendText("r")
-    );
-
-    addAnkiButton(
-            utilityRow,
-            "MARK\n*",
-            GREEN,
-            () -> sendText("*")
-    );
-
-    addAnkiButton(
-            utilityRow,
-            "MORE\nM",
-            BLUE,
-            () -> sendText("m")
-    );
-
-    main.addView(utilityRow, rowParams());
-
-    // Switch modes
-    LinearLayout modeRow = keyboardRow();
-
-    addAnkiButton(
-            modeRow,
-            "KEYBOARD",
-            PAPER,
-            () -> showInputLayout(false, true)
-    );
-
-    addAnkiButton(
-            modeRow,
-            "GAMEPAD",
-            BLUE,
-            () -> showInputLayout(true, true)
-    );
-
-    main.addView(modeRow, rowParams());
-
-    outer.addView(
-            main,
-            new LinearLayout.LayoutParams(
-                    0,
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    1
-            )
-    );
-
-    // PERMANENT RIGHT-SIDE SCROLL STRIP
-    TextView scrollPad = text(
-            "SCROLL\n\n▲\n\n↕\n\n▼",
-            14
-    );
-
-    scrollPad.setTypeface(Typeface.DEFAULT_BOLD);
-    scrollPad.setGravity(Gravity.CENTER);
-    scrollPad.setTextColor(INK);
-    scrollPad.setBackground(rounded(BLUE));
-
-    scrollPad.setOnTouchListener(new ScrollPadListener(this));
-
-    scrollPad.setOnHoverListener((view, event) -> {
-        if (event.getActionMasked() == MotionEvent.ACTION_HOVER_ENTER) {
-            view.animate()
-                    .scaleX(1.025f)
-                    .scaleY(1.015f)
-                    .setDuration(80)
-                    .start();
-        } else if (event.getActionMasked() == MotionEvent.ACTION_HOVER_EXIT) {
-            view.animate()
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(80)
-                    .start();
+        if (controllerPanel != null) {
+            controllerPanel.releaseAll();
+            controllerPanel = null;
         }
-        return false;
-    });
 
-    LinearLayout.LayoutParams scrollParams =
-            new LinearLayout.LayoutParams(
-                    dp(72),
-                    LinearLayout.LayoutParams.MATCH_PARENT
-            );
+        // Anki mode is intended to be used as the direct Bluetooth remote.
+        if (bluetoothModeButton != null) {
+            bluetoothModeButton.setChecked(true);
+        }
 
-    scrollParams.setMargins(dp(4), 0, 0, 0);
+        if (normalTopBar != null)
+            normalTopBar.setVisibility(View.VISIBLE);
 
-    outer.addView(scrollPad, scrollParams);
+        if (controllerTopBar != null)
+            controllerTopBar.setVisibility(View.GONE);
 
-    return outer;
-}
+        if (inputContainer == null) return;
 
-private void addAnkiButton(
-        LinearLayout row,
-        String label,
-        int color,
-        Runnable action) {
+        inputContainer.removeAllViews();
+        inputContainer.addView(
+                buildAnkiLayout(),
+                new LinearLayout.LayoutParams(-1, -1)
+        );
 
-    Button button = neoButton(label, color);
+        if (announce) {
+            Toast.makeText(
+                    this,
+                    "Anki review layout",
+                    Toast.LENGTH_SHORT
+            ).show();
+        }
 
-    button.setTextSize(15);
-    button.setTypeface(Typeface.DEFAULT_BOLD);
+        updateStatus();
+    }
 
-    button.setOnClickListener(v -> action.run());
+    private View buildAnkiLayout() {
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.HORIZONTAL);
+        outer.setPadding(0, dp(4), 0, dp(4));
+        outer.setBackgroundColor(PAPER);
 
-    row.addView(button, keyParams(1f));
-}
+        // Main Anki controls
+        LinearLayout main = new LinearLayout(this);
+        main.setOrientation(LinearLayout.VERTICAL);
+        main.setPadding(0, 0, dp(5), 0);
+
+        TextView title = text("ANKI REVIEW", 18);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setGravity(Gravity.CENTER);
+        title.setTextColor(INK);
+
+        main.addView(
+                title,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(32)
+                )
+        );
+
+        // FLIP
+        LinearLayout flipRow = keyboardRow();
+        addAnkiButton(
+                flipRow,
+                "FLIP\nSPACE",
+                YELLOW,
+                () -> sendSpecial("SPACE", 0x2C)
+        );
+        main.addView(flipRow, rowParams());
+
+        // 1–4 ratings
+        LinearLayout ratingRow = keyboardRow();
+        addAnkiButton(
+                ratingRow,
+                "AGAIN\n1",
+                CORAL,
+                () -> sendText("1")
+        );
+        addAnkiButton(
+                ratingRow,
+                "HARD\n2",
+                PAPER,
+                () -> sendText("2")
+        );
+        addAnkiButton(
+                ratingRow,
+                "GOOD\n3",
+                GREEN,
+                () -> sendText("3")
+        );
+        addAnkiButton(
+                ratingRow,
+                "EASY\n4",
+                BLUE,
+                () -> sendText("4")
+        );
+        main.addView(ratingRow, rowParams());
+
+        // Useful secondary controls
+        LinearLayout utilityRow = keyboardRow();
+        addAnkiButton(
+                utilityRow,
+                "UNDO\nU",
+                PAPER,
+                () -> sendText("u")
+        );
+        addAnkiButton(
+                utilityRow,
+                "REPLAY\nR",
+                YELLOW,
+                () -> sendText("r")
+        );
+        addAnkiButton(
+                utilityRow,
+                "MARK\n*",
+                GREEN,
+                () -> sendText("*")
+        );
+        addAnkiButton(
+                utilityRow,
+                "MORE\nM",
+                BLUE,
+                () -> sendText("m")
+        );
+        main.addView(utilityRow, rowParams());
+
+        // Switch modes
+        LinearLayout modeRow = keyboardRow();
+        addAnkiButton(
+                modeRow,
+                "KEYBOARD",
+                PAPER,
+                () -> showInputLayout(false, true)
+        );
+        addAnkiButton(
+                modeRow,
+                "GAMEPAD",
+                BLUE,
+                () -> showInputLayout(true, true)
+        );
+        main.addView(modeRow, rowParams());
+
+        outer.addView(
+                main,
+                new LinearLayout.LayoutParams(
+                        0,
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        1
+                )
+        );
+
+        // PERMANENT RIGHT-SIDE SCROLL STRIP
+        TextView scrollPad = text(
+                "SCROLL\n\n▲\n\n↕\n\n▼",
+                14
+        );
+        scrollPad.setTypeface(Typeface.DEFAULT_BOLD);
+        scrollPad.setGravity(Gravity.CENTER);
+        scrollPad.setTextColor(INK);
+        scrollPad.setBackground(rounded(BLUE));
+        scrollPad.setOnTouchListener(new ScrollPadListener(this));
+        scrollPad.setOnHoverListener((view, event) -> {
+            if (event.getActionMasked() == MotionEvent.ACTION_HOVER_ENTER) {
+                view.animate()
+                        .scaleX(1.025f)
+                        .scaleY(1.015f)
+                        .setDuration(80)
+                        .start();
+            } else if (event.getActionMasked() == MotionEvent.ACTION_HOVER_EXIT) {
+                view.animate()
+                        .scaleX(1f)
+                        .scaleY(1f)
+                        .setDuration(80)
+                        .start();
+            }
+            return false;
+        });
+
+        LinearLayout.LayoutParams scrollParams =
+                new LinearLayout.LayoutParams(
+                        dp(72),
+                        LinearLayout.LayoutParams.MATCH_PARENT
+                );
+        scrollParams.setMargins(dp(4), 0, 0, 0);
+
+        outer.addView(scrollPad, scrollParams);
+        return outer;
+    }
+
+    private void addAnkiButton(
+            LinearLayout row,
+            String label,
+            int color,
+            Runnable action) {
+        Button button = neoButton(label, color);
+        button.setTextSize(15);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setOnClickListener(v -> action.run());
+        row.addView(button, keyParams(1f));
+    }
+
     private void showTrackpadPopup(View anchor) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -623,7 +597,7 @@ private void addAnkiButton(
         scrollPad.setTextColor(INK);
         scrollPad.setBackground(rounded(BLUE));
         scrollPad.setOnTouchListener(new ScrollPadListener(this));
- scrollPad.setOnHoverListener((view, event) -> {
+        scrollPad.setOnHoverListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_HOVER_ENTER) {
                 view.animate().scaleX(1.025f).scaleY(1.015f).setDuration(80).start();
             } else if (event.getActionMasked() == MotionEvent.ACTION_HOVER_EXIT) {
@@ -697,38 +671,38 @@ private void addAnkiButton(
     }
 
     private void showToolsPopup(View anchor) {
-    LinearLayout card = new LinearLayout(this);
-    card.setOrientation(LinearLayout.VERTICAL);
-    card.setPadding(dp(8), dp(8), dp(8), dp(8));
-    card.setBackground(neoBackground(YELLOW));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(8), dp(8), dp(8), dp(8));
+        card.setBackground(neoBackground(YELLOW));
 
-    Button functions = neoButton("F KEYS + NAV", PAPER);
-    functions.setOnClickListener(v -> {
-        toolsPopup.dismiss();
-        uiHandler.post(() -> showFunctionPopup(anchor));
-    });
-    card.addView(functions, new LinearLayout.LayoutParams(dp(190), dp(52)));
+        Button functions = neoButton("F KEYS + NAV", PAPER);
+        functions.setOnClickListener(v -> {
+            toolsPopup.dismiss();
+            uiHandler.post(() -> showFunctionPopup(anchor));
+        });
+        card.addView(functions, new LinearLayout.LayoutParams(dp(190), dp(52)));
 
-    Button system = neoButton("SYSTEM", BLUE);
-    system.setOnClickListener(v -> {
-        toolsPopup.dismiss();
-        uiHandler.post(() -> showSystemPopup(anchor));
-    });
-    card.addView(system, new LinearLayout.LayoutParams(dp(190), dp(52)));
+        Button system = neoButton("SYSTEM", BLUE);
+        system.setOnClickListener(v -> {
+            toolsPopup.dismiss();
+            uiHandler.post(() -> showSystemPopup(anchor));
+        });
+        card.addView(system, new LinearLayout.LayoutParams(dp(190), dp(52)));
 
-    Button anki = neoButton("ANKI REVIEW", CORAL);
-    anki.setOnClickListener(v -> {
-        toolsPopup.dismiss();
-        uiHandler.post(() -> showAnkiLayout(true));
-    });
-    card.addView(anki, new LinearLayout.LayoutParams(dp(190), dp(52)));
+        Button anki = neoButton("ANKI REVIEW", CORAL);
+        anki.setOnClickListener(v -> {
+            toolsPopup.dismiss();
+            uiHandler.post(() -> showAnkiLayout(true));
+        });
+        card.addView(anki, new LinearLayout.LayoutParams(dp(190), dp(52)));
 
-    toolsPopup = new PopupWindow(card, dp(206), dp(176), true);
-    toolsPopup.setBackgroundDrawable(rounded(Color.TRANSPARENT));
-    toolsPopup.setOutsideTouchable(true);
-    toolsPopup.setElevation(dp(12));
-    toolsPopup.showAsDropDown(anchor, 0, dp(4));
-}
+        toolsPopup = new PopupWindow(card, dp(206), dp(176), true);
+        toolsPopup.setBackgroundDrawable(rounded(Color.TRANSPARENT));
+        toolsPopup.setOutsideTouchable(true);
+        toolsPopup.setElevation(dp(12));
+        toolsPopup.showAsDropDown(anchor, 0, dp(4));
+    }
 
     private void addSystemKey(LinearLayout row, String label, String name, int usage, int color) {
         Button key = neoButton(label, color);
@@ -1466,5 +1440,4 @@ private void addAnkiButton(
     public void scrollVisual(View view, boolean pressed) {
         view.setBackground(rounded(pressed ? Color.rgb(104, 157, 222) : BLUE));
     }
-
 }
