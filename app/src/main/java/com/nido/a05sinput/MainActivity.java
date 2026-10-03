@@ -127,7 +127,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        enableImmersiveMode();
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
         bluetooth = new BluetoothHidController(this, uiHandler,
                 new BluetoothHidController.Listener() {
@@ -143,7 +143,6 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
                     }
                 });
         loadSettings();
-        applyOrientationPreference();
 
         usb = new UsbBridgeServer(new UsbBridgeServer.Listener() {
             @Override public void onHostLine(String line) {
@@ -164,6 +163,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         initProceduralAudio();
 
         setContentView(buildUi());
+        enableImmersiveMode();
+
         usb.start();
         requestBluetoothPermission();
     }
@@ -213,35 +214,46 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     }
 
     // =========================================================================
-    // IMMERSIVE FULLSCREEN UTILITY (Zero Status / Nav Bars)
+    // SAFE IMMERSIVE FULLSCREEN UTILITY
     // =========================================================================
 
     private void enableImmersiveMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            WindowInsetsController controller = getWindow().getInsetsController();
-            if (controller != null) {
-                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        try {
+            View decor = getWindow().peekDecorView();
+            if (decor == null) return;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                WindowInsetsController controller = decor.getWindowInsetsController();
+                if (controller != null) {
+                    controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                    controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                }
+            } else {
+                decor.setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
             }
-        } else {
-            getWindow().getDecorView().setSystemUiVisibility(
-                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    | View.SYSTEM_UI_FLAG_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
-        }
+        } catch (Throwable ignored) {}
     }
 
     private void applyOrientationPreference() {
-        if (ankiOrientationMode == 1) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-        } else if (ankiOrientationMode == 2) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-        } else {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
-        }
+        try {
+            if (!ankiActive) {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+                return;
+            }
+            if (ankiOrientationMode == 1) {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            } else if (ankiOrientationMode == 2) {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            } else {
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+            }
+        } catch (Throwable ignored) {}
     }
 
     // =========================================================================
@@ -404,6 +416,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         ankiBlackoutActive = false;
         controllerLayout = useController;
         saveSettings();
+        applyOrientationPreference();
+
         if (normalTopBar != null)
             normalTopBar.setVisibility(useController ? View.GONE : View.VISIBLE);
         if (controllerTopBar != null)
@@ -459,6 +473,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         controllerLayout = false;
         ankiIsAnswerSide = false;
 
+        applyOrientationPreference();
+
         if (controllerPanel != null) {
             controllerPanel.releaseAll();
             controllerPanel = null;
@@ -473,7 +489,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         if (inputContainer == null) return;
 
         inputContainer.removeAllViews();
-        inputContainer.addView(buildAnkiLayout(), new LinearLayout.LayoutParams(-1, -1));
+        inputContainer.addView(buildAnkiLayout(), new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
         if (announce) {
             Toast.makeText(this, "Anki Remote Active", Toast.LENGTH_SHORT).show();
@@ -496,17 +513,16 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         blackoutRoot.setOrientation(LinearLayout.VERTICAL);
         blackoutRoot.setBackgroundColor(Color.BLACK);
 
-        // Minimalist, OLED-Safe Status Bar
         LinearLayout topIndicator = new LinearLayout(this);
         topIndicator.setOrientation(LinearLayout.HORIZONTAL);
         topIndicator.setGravity(Gravity.CENTER_VERTICAL);
         topIndicator.setPadding(dp(12), dp(4), dp(12), dp(4));
 
         TextView dot = new TextView(this);
-        dot.setText("● STEALTH BLIND MODE  (Vol Down: Flip/Good | Vol Up: Again | Swipe: Scroll)");
+        dot.setText("● STEALTH BLIND MODE (Vol Down: Flip/Good | Vol Up: Again | Swipe: Scroll)");
         dot.setTextSize(10);
-        dot.setTextColor(Color.rgb(40, 70, 40)); // Ultra-dim green
-        topIndicator.addView(dot, new LinearLayout.LayoutParams(0, -2, 1));
+        dot.setTextColor(Color.rgb(40, 70, 40));
+        topIndicator.addView(dot, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
 
         Button exitBtn = new Button(this);
         exitBtn.setText("EXIT");
@@ -516,15 +532,17 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         exitBtn.setOnClickListener(v -> showAnkiLayout(false));
         topIndicator.addView(exitBtn, new LinearLayout.LayoutParams(dp(64), dp(34)));
 
-        blackoutRoot.addView(topIndicator, new LinearLayout.LayoutParams(-1, dp(42)));
+        blackoutRoot.addView(topIndicator, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
 
-        // Full-Screen Blind Vertical Scroll Surface
         View fullScreenScroll = new View(this);
         fullScreenScroll.setBackgroundColor(Color.BLACK);
         fullScreenScroll.setOnTouchListener(new ScrollPadListener(this));
-        blackoutRoot.addView(fullScreenScroll, new LinearLayout.LayoutParams(-1, -1));
+        blackoutRoot.addView(fullScreenScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
 
-        inputContainer.addView(blackoutRoot, new LinearLayout.LayoutParams(-1, -1));
+        inputContainer.addView(blackoutRoot, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.MATCH_PARENT));
     }
 
     private View buildAnkiLayout() {
@@ -540,7 +558,6 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         main.setOrientation(LinearLayout.VERTICAL);
         main.setPadding(0, 0, dp(4), 0);
 
-        // 1. Horizontal Scrollable Utility Bar (No button crowding/squishing)
         HorizontalScrollView scrollNav = new HorizontalScrollView(this);
         scrollNav.setHorizontalScrollBarEnabled(false);
         scrollNav.setFillViewport(true);
@@ -607,37 +624,37 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         exitBtn.setOnClickListener(v -> showInputLayout(false, true));
         topBar.addView(exitBtn, new LinearLayout.LayoutParams(dp(68), dp(42)));
 
-        scrollNav.addView(topBar, new LinearLayout.LayoutParams(-2, dp(44)));
-        main.addView(scrollNav, new LinearLayout.LayoutParams(-1, dp(46)));
+        scrollNav.addView(topBar, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, dp(44)));
+        main.addView(scrollNav, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
 
-        // 2. Main Rating & Flip Body
         if (ankiLayoutStyle == 0 || isPortrait) {
-            // CONCEPT A / PORTRAIT BALANCED
             Button flipBtn = neoButton("FLIP / SPACE\n(Vol Down)", YELLOW);
             flipBtn.setTextSize(18);
             flipBtn.setTypeface(Typeface.DEFAULT_BOLD);
             flipBtn.setOnClickListener(v -> performAnkiFlip());
-            LinearLayout.LayoutParams flipParams = new LinearLayout.LayoutParams(-1, 0, isPortrait ? 1.5f : 1.3f);
+            LinearLayout.LayoutParams flipParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, isPortrait ? 1.5f : 1.3f);
             flipParams.setMargins(0, dp(4), 0, dp(4));
             main.addView(flipBtn, flipParams);
 
-            // Primary Rating Row
             LinearLayout ratingRow1 = new LinearLayout(this);
             ratingRow1.setOrientation(LinearLayout.HORIZONTAL);
             addLargeRatingButton(ratingRow1, "AGAIN · 1\n(Vol Up)", CORAL, 1.0f, this::performAnkiAgain);
             addLargeRatingButton(ratingRow1, "GOOD · 3\n(Vol Down)", GREEN, 1.0f, this::performAnkiGood);
-            LinearLayout.LayoutParams r1Params = new LinearLayout.LayoutParams(-1, 0, 1.0f);
+            LinearLayout.LayoutParams r1Params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f);
             r1Params.setMargins(0, dp(2), 0, dp(2));
             main.addView(ratingRow1, r1Params);
 
-            // Secondary Rating Row
             LinearLayout ratingRow2 = new LinearLayout(this);
             ratingRow2.setOrientation(LinearLayout.HORIZONTAL);
             addLargeRatingButton(ratingRow2, "HARD · 2", PAPER, 1.0f, this::performAnkiHard);
             addLargeRatingButton(ratingRow2, "EASY · 4", BLUE, 1.0f, this::performAnkiEasy);
-            main.addView(ratingRow2, new LinearLayout.LayoutParams(-1, dp(46)));
+            main.addView(ratingRow2, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
         } else {
-            // CONCEPT B (Landscape Split Zone)
             LinearLayout splitContent = new LinearLayout(this);
             splitContent.setOrientation(LinearLayout.HORIZONTAL);
 
@@ -645,7 +662,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             leftFlipBtn.setTextSize(20);
             leftFlipBtn.setTypeface(Typeface.DEFAULT_BOLD);
             leftFlipBtn.setOnClickListener(v -> performAnkiFlip());
-            LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(0, -1, 1.1f);
+            LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.1f);
             leftParams.setMargins(0, dp(4), dp(4), 0);
             splitContent.addView(leftFlipBtn, leftParams);
 
@@ -656,7 +673,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             goodBtn.setTextSize(17);
             goodBtn.setTypeface(Typeface.DEFAULT_BOLD);
             goodBtn.setOnClickListener(v -> performAnkiGood());
-            LinearLayout.LayoutParams goodParams = new LinearLayout.LayoutParams(-1, 0, 1.2f);
+            LinearLayout.LayoutParams goodParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.2f);
             goodParams.setMargins(0, dp(4), 0, dp(2));
             rightRatings.addView(goodBtn, goodParams);
 
@@ -664,7 +681,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             againBtn.setTextSize(17);
             againBtn.setTypeface(Typeface.DEFAULT_BOLD);
             againBtn.setOnClickListener(v -> performAnkiAgain());
-            LinearLayout.LayoutParams againParams = new LinearLayout.LayoutParams(-1, 0, 1.2f);
+            LinearLayout.LayoutParams againParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.2f);
             againParams.setMargins(0, dp(2), 0, dp(2));
             rightRatings.addView(againBtn, againParams);
 
@@ -672,15 +689,16 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             cornerRow.setOrientation(LinearLayout.HORIZONTAL);
             addLargeRatingButton(cornerRow, "HARD · 2", PAPER, 1.0f, this::performAnkiHard);
             addLargeRatingButton(cornerRow, "EASY · 4", BLUE, 1.0f, this::performAnkiEasy);
-            rightRatings.addView(cornerRow, new LinearLayout.LayoutParams(-1, dp(44)));
+            rightRatings.addView(cornerRow, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
 
-            splitContent.addView(rightRatings, new LinearLayout.LayoutParams(0, -1, 1.0f));
-            main.addView(splitContent, new LinearLayout.LayoutParams(-1, 0, 1.0f));
+            splitContent.addView(rightRatings, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.0f));
+            main.addView(splitContent, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f));
         }
 
-        outer.addView(main, new LinearLayout.LayoutParams(0, -1, 1.0f));
+        outer.addView(main, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.0f));
 
-        // 3. Permanent Right-Side Scroll Strip
         TextView scrollPad = text("SCROLL\n\n▲\n\n↕\n\n▼", 14);
         scrollPad.setTypeface(Typeface.DEFAULT_BOLD);
         scrollPad.setGravity(Gravity.CENTER);
@@ -697,7 +715,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         });
 
         int stripWidth = isPortrait ? dp(66) : dp(74);
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(stripWidth, -1);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(stripWidth, LinearLayout.LayoutParams.MATCH_PARENT);
         scrollParams.setMargins(dp(4), 0, 0, 0);
         outer.addView(scrollPad, scrollParams);
 
@@ -719,7 +737,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         btn.setTextSize(15);
         btn.setTypeface(Typeface.DEFAULT_BOLD);
         btn.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, weight);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight);
         params.setMargins(dp(2), dp(2), dp(2), dp(2));
         row.addView(btn, params);
     }
@@ -737,7 +755,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
                         handleAnkiVolumeUp();
                     }
                 }
-                return true; // Completely suppress OxygenOS volume slider
+                return true;
             }
         }
         return super.dispatchKeyEvent(event);
@@ -764,7 +782,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     }
 
     private void performAnkiGood() {
-        sendAnkiSpecialKey("SPACE", 0x2C); // Native Anki: Space on answer selects Good
+        sendAnkiSpecialKey("SPACE", 0x2C);
         triggerAnkiHaptic(HapticFeedbackConstants.CONFIRM);
         playSoundTrack(soundGood);
         ankiIsAnswerSide = false;
@@ -795,7 +813,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         if (mode == MODE_USB) {
             broadcast("HOTKEY CTRL+Z");
         } else if (mode == MODE_BLUETOOTH) {
-            sendBluetoothKey(0x01, 0x1D); // 0x01 = Ctrl, 0x1D = Z
+            sendBluetoothKey(0x01, 0x1D);
         }
         triggerAnkiHaptic(HapticFeedbackConstants.VIRTUAL_KEY);
         playSoundTrack(soundFlip);
@@ -817,7 +835,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     }
 
     // =========================================================================
-    // PROCEDURAL AUDIO SYNTHESIZER (IN-MEMORY PCM)
+    // PROCEDURAL AUDIO SYNTHESIZER
     // =========================================================================
 
     private void initProceduralAudio() {
@@ -827,7 +845,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             soundAgain = createToneTrack(280, 24, 120.0);
             soundHard = createToneTrack(460, 20, 150.0);
             soundEasy = createToneTrack(1800, 10, 320.0);
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
     }
 
     private AudioTrack createToneTrack(int freq, int durationMs, double decayRate) {
@@ -863,15 +881,17 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             track.stop();
             track.reloadStaticData();
             track.play();
-        } catch (Exception ignored) {}
+        } catch (Throwable ignored) {}
     }
 
     private void releaseProceduralAudio() {
-        if (soundFlip != null) { soundFlip.release(); soundFlip = null; }
-        if (soundGood != null) { soundGood.release(); soundGood = null; }
-        if (soundAgain != null) { soundAgain.release(); soundAgain = null; }
-        if (soundHard != null) { soundHard.release(); soundHard = null; }
-        if (soundEasy != null) { soundEasy.release(); soundEasy = null; }
+        try {
+            if (soundFlip != null) { soundFlip.release(); soundFlip = null; }
+            if (soundGood != null) { soundGood.release(); soundGood = null; }
+            if (soundAgain != null) { soundAgain.release(); soundAgain = null; }
+            if (soundHard != null) { soundHard.release(); soundHard = null; }
+            if (soundEasy != null) { soundEasy.release(); soundEasy = null; }
+        } catch (Throwable ignored) {}
     }
 
     // =========================================================================
