@@ -146,7 +146,8 @@ Tap **ANKI** (or **TOOLS ▾ → ANKI REVIEW**) for a dedicated flashcard remote
 **GOOD · 3**, and **EASY · 4** grade the card. The phone's volume keys work too:
 Volume Down flips and then grades Good, and Volume Up grades Again. The header
 shows the live connection (tap it to open the Pair card) plus Undo, Replay, Mark,
-More, Stealth, and Exit. The scroll strip on the right scrolls long cards.
+More, Stealth, and Exit. On the right, the **TAP** pad aims and clicks the
+computer's or tablet's pointer, and the scroll strip below it scrolls long cards.
 
 **SET ▾** holds the target (below), the Center/Split layout, rotation (Auto,
 Portrait, Landscape), OLED black, haptics, and sound. Portrait always uses the
@@ -190,6 +191,16 @@ Notes for AnkiDroid:
 - If you changed AnkiDroid's key bindings (**Settings → Controls**), the remote
   sends the default keys listed above.
 - On "type in the answer" cards, keys go to the answer field until it is submitted.
+
+**Images and sketches.** Many note types enlarge an image when the mouse hovers
+over it on a PC, or when you tap it on a tablet. Android only updates hover when
+the pointer moves, so after each scroll with the AnkiDroid target, the remote
+nudges the tablet's pointer by one pixel and back. The image now under the
+pointer reacts the same way it does on the PC. For a specific image, use the
+**TAP** pad above the scroll strip: drag it to aim the tablet's pointer, then tap
+to click, which is the same as tapping the image. In **STEALTH**, double-tap
+anywhere to click. If AnkiDroid tap gestures are enabled (**Settings → Controls**),
+a click on an empty part of the card also triggers that gesture.
 
 ## System controls and laptop battery
 

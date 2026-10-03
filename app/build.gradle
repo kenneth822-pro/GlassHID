@@ -10,7 +10,7 @@ android {
         applicationId 'com.nido.a05sinput'
         minSdk 28
         targetSdk 34
-        versionCode 5
-        versionName '1.4.0'
+        versionCode 6
+        versionName '1.4.1'
     }
 }

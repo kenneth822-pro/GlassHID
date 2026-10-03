@@ -562,7 +562,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         topIndicator.setPadding(dp(12), dp(4), dp(12), dp(4));
 
         TextView dot = new TextView(this);
-        dot.setText("● STEALTH BLIND MODE (Vol Down: Flip/Good | Vol Up: Again | Swipe: Scroll)");
+        dot.setText("● STEALTH BLIND MODE (Vol Down: Flip/Good | Vol Up: Again | Swipe: Scroll | Double-tap: Tap)");
         dot.setTextSize(10);
         dot.setTextColor(Color.rgb(40, 75, 45)); // Ultra-dim green
         topIndicator.addView(dot, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
@@ -584,7 +584,11 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         // Full-screen surface that NEVER flashes
         View fullScreenScroll = new View(this);
         fullScreenScroll.setBackgroundColor(Color.BLACK);
-        fullScreenScroll.setOnTouchListener(new ScrollPadListener(this));
+        // Double-tap clicks under the host's pointer, e.g. to zoom an image on the card.
+        fullScreenScroll.setOnTouchListener(new ScrollPadListener(this, () -> {
+            clickLeft();
+            triggerAnkiHaptic(HapticFeedbackConstants.CONFIRM);
+        }));
         blackoutRoot.addView(fullScreenScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
         return blackoutRoot;
@@ -639,7 +643,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         LinearLayout.LayoutParams stripParams = new LinearLayout.LayoutParams(
                 dp(portrait ? 64 : 76), LinearLayout.LayoutParams.MATCH_PARENT);
         stripParams.leftMargin = dp(6);
-        body.addView(buildAnkiScrollStrip(), stripParams);
+        body.addView(buildAnkiPointerColumn(), stripParams);
 
         LinearLayout.LayoutParams bodyParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1);
@@ -698,6 +702,27 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             pad.addView(ratings, new LinearLayout.LayoutParams(0, match, 1f));
         }
         return pad;
+    }
+
+    /** Tap/aim pad above the scroll strip: tapping an image on the card zooms it in AnkiDroid. */
+    private View buildAnkiPointerColumn() {
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+
+        TextView tapPad = text("TAP\n◎\ndrag\nto aim", 11);
+        tapPad.setTypeface(Typeface.DEFAULT_BOLD);
+        tapPad.setGravity(Gravity.CENTER);
+        tapPad.setTextColor(ankiOledMode ? BLUE : INK);
+        scrollVisual(tapPad, false);
+        tapPad.setOnTouchListener(new PointerPadListener(this));
+        column.addView(tapPad, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 0.36f));
+
+        LinearLayout.LayoutParams stripParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+        stripParams.topMargin = dp(6);
+        column.addView(buildAnkiScrollStrip(), stripParams);
+        return column;
     }
 
     private View buildAnkiScrollStrip() {
@@ -2131,6 +2156,18 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
                 : state == TrackpadGestureListener.VISUAL_PRESSED
                 ? Color.rgb(45, 45, 45) : INK;
         view.setBackground(rounded(color));
+    }
+
+    /**
+     * Android only re-evaluates hover when the pointer moves, so after a scroll the
+     * image now under the pointer would not react the way it does on a PC. A 1 px
+     * nudge and back makes AnkiDroid apply the card's hover styling (e.g. image zoom).
+     */
+    @Override
+    public void scrollFinished() {
+        if (mode != MODE_BLUETOOTH || !ankiDroidTarget()) return;
+        move(1, 0);
+        uiHandler.postDelayed(() -> move(-1, 0), 45);
     }
 
     @Override
