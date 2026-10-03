@@ -6,7 +6,9 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -26,8 +28,11 @@ import android.view.HapticFeedbackConstants;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.RadioButton;
@@ -101,14 +106,17 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     private final List<Button> altButtons = new ArrayList<>();
     private final List<Button> winButtons = new ArrayList<>();
 
-    // Anki System Configuration & State
+    // Anki System Configuration & Advanced State
     private boolean ankiActive = false;
     private int ankiLayoutStyle = 0; // 0 = Center Thumb, 1 = Split Zone
     private boolean ankiHapticsOn = true;
     private boolean ankiSoundOn = true;
+    private boolean ankiOledMode = true; // Default to true AMOLED pitch black
+    private boolean ankiBlackoutActive = false; // Stealth/Blind Review mode
+    private int ankiOrientationMode = 0; // 0 = Auto/Sensor, 1 = Lock Port, 2 = Lock Land
     private boolean ankiIsAnswerSide = false;
 
-    // Procedural Audio Tracks
+    // Procedural Audio Tracks (In-memory PCM synthesis)
     private AudioTrack soundFlip;
     private AudioTrack soundGood;
     private AudioTrack soundAgain;
@@ -119,6 +127,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        enableImmersiveMode();
+
         bluetooth = new BluetoothHidController(this, uiHandler,
                 new BluetoothHidController.Listener() {
                     @Override public void onStateChanged() {
@@ -133,6 +143,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
                     }
                 });
         loadSettings();
+        applyOrientationPreference();
+
         usb = new UsbBridgeServer(new UsbBridgeServer.Listener() {
             @Override public void onHostLine(String line) {
                 handleHostLine(line);
@@ -159,8 +171,30 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     @Override
     protected void onResume() {
         super.onResume();
+        enableImmersiveMode();
         bluetooth.setForeground(true);
         bluetooth.setActive(mode == MODE_BLUETOOTH);
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            enableImmersiveMode();
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        enableImmersiveMode();
+        if (ankiActive) {
+            if (ankiBlackoutActive) {
+                showBlackoutLayout();
+            } else {
+                showAnkiLayout(false);
+            }
+        }
     }
 
     @Override
@@ -177,6 +211,42 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         usb.close();
         releaseProceduralAudio();
     }
+
+    // =========================================================================
+    // IMMERSIVE FULLSCREEN UTILITY (Zero Status / Nav Bars)
+    // =========================================================================
+
+    private void enableImmersiveMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    | View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        }
+    }
+
+    private void applyOrientationPreference() {
+        if (ankiOrientationMode == 1) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        } else if (ankiOrientationMode == 2) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        } else {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
+        }
+    }
+
+    // =========================================================================
+    // STANDARD UI BUILDER
+    // =========================================================================
 
     private View buildUi() {
         int pad = dp(8);
@@ -331,6 +401,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
 
     private void showInputLayout(boolean useController, boolean announce) {
         ankiActive = false;
+        ankiBlackoutActive = false;
         controllerLayout = useController;
         saveSettings();
         if (normalTopBar != null)
@@ -379,11 +450,12 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     }
 
     // =========================================================================
-    // DEDICATED ANKI ENGINE (DUAL LAYOUT, HARDWARE KEYS, HAPTICS, SOUND)
+    // DEDICATED ANKI REMOTE ENGINE
     // =========================================================================
 
     private void showAnkiLayout(boolean announce) {
         ankiActive = true;
+        ankiBlackoutActive = false;
         controllerLayout = false;
         ankiIsAnswerSide = false;
 
@@ -392,7 +464,6 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             controllerPanel = null;
         }
 
-        // If inactive, default to Bluetooth; preserve USB if already selected
         if (mode == MODE_OFF && bluetoothModeButton != null) {
             bluetoothModeButton.setChecked(true);
         }
@@ -405,22 +476,75 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         inputContainer.addView(buildAnkiLayout(), new LinearLayout.LayoutParams(-1, -1));
 
         if (announce) {
-            Toast.makeText(this, "Anki Remote Active (Vol Down = Flip/Good)", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Anki Remote Active", Toast.LENGTH_SHORT).show();
         }
         updateStatus();
     }
 
+    private void showBlackoutLayout() {
+        ankiActive = true;
+        ankiBlackoutActive = true;
+        controllerLayout = false;
+
+        if (normalTopBar != null) normalTopBar.setVisibility(View.GONE);
+        if (controllerTopBar != null) controllerTopBar.setVisibility(View.GONE);
+        if (inputContainer == null) return;
+
+        inputContainer.removeAllViews();
+
+        LinearLayout blackoutRoot = new LinearLayout(this);
+        blackoutRoot.setOrientation(LinearLayout.VERTICAL);
+        blackoutRoot.setBackgroundColor(Color.BLACK);
+
+        // Minimalist, OLED-Safe Status Bar
+        LinearLayout topIndicator = new LinearLayout(this);
+        topIndicator.setOrientation(LinearLayout.HORIZONTAL);
+        topIndicator.setGravity(Gravity.CENTER_VERTICAL);
+        topIndicator.setPadding(dp(12), dp(4), dp(12), dp(4));
+
+        TextView dot = new TextView(this);
+        dot.setText("● STEALTH BLIND MODE  (Vol Down: Flip/Good | Vol Up: Again | Swipe: Scroll)");
+        dot.setTextSize(10);
+        dot.setTextColor(Color.rgb(40, 70, 40)); // Ultra-dim green
+        topIndicator.addView(dot, new LinearLayout.LayoutParams(0, -2, 1));
+
+        Button exitBtn = new Button(this);
+        exitBtn.setText("EXIT");
+        exitBtn.setTextSize(11);
+        exitBtn.setTextColor(Color.rgb(120, 120, 120));
+        exitBtn.setBackground(rounded(Color.rgb(20, 20, 20)));
+        exitBtn.setOnClickListener(v -> showAnkiLayout(false));
+        topIndicator.addView(exitBtn, new LinearLayout.LayoutParams(dp(64), dp(34)));
+
+        blackoutRoot.addView(topIndicator, new LinearLayout.LayoutParams(-1, dp(42)));
+
+        // Full-Screen Blind Vertical Scroll Surface
+        View fullScreenScroll = new View(this);
+        fullScreenScroll.setBackgroundColor(Color.BLACK);
+        fullScreenScroll.setOnTouchListener(new ScrollPadListener(this));
+        blackoutRoot.addView(fullScreenScroll, new LinearLayout.LayoutParams(-1, -1));
+
+        inputContainer.addView(blackoutRoot, new LinearLayout.LayoutParams(-1, -1));
+    }
+
     private View buildAnkiLayout() {
+        boolean isPortrait = getResources().getConfiguration().orientation == Configuration.ORIENTATION_PORTRAIT;
+        int bgColor = ankiOledMode ? Color.BLACK : PAPER;
+
         LinearLayout outer = new LinearLayout(this);
         outer.setOrientation(LinearLayout.HORIZONTAL);
         outer.setPadding(dp(4), dp(4), dp(4), dp(4));
-        outer.setBackgroundColor(PAPER);
+        outer.setBackgroundColor(bgColor);
 
         LinearLayout main = new LinearLayout(this);
         main.setOrientation(LinearLayout.VERTICAL);
         main.setPadding(0, 0, dp(4), 0);
 
-        // 1. Top Utility Row
+        // 1. Horizontal Scrollable Utility Bar (No button crowding/squishing)
+        HorizontalScrollView scrollNav = new HorizontalScrollView(this);
+        scrollNav.setHorizontalScrollBarEnabled(false);
+        scrollNav.setFillViewport(true);
+
         LinearLayout topBar = new LinearLayout(this);
         topBar.setOrientation(LinearLayout.HORIZONTAL);
         topBar.setGravity(Gravity.CENTER_VERTICAL);
@@ -431,7 +555,28 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             saveSettings();
             showAnkiLayout(false);
         });
-        topBar.addView(styleBtn, new LinearLayout.LayoutParams(dp(118), dp(44)));
+        topBar.addView(styleBtn, new LinearLayout.LayoutParams(dp(116), dp(42)));
+
+        Button oledBtn = neoButton("OLED: " + (ankiOledMode ? "ON" : "OFF"), ankiOledMode ? GREEN : PAPER);
+        oledBtn.setOnClickListener(v -> {
+            ankiOledMode = !ankiOledMode;
+            saveSettings();
+            showAnkiLayout(false);
+        });
+        topBar.addView(oledBtn, new LinearLayout.LayoutParams(dp(88), dp(42)));
+
+        Button stealthBtn = neoButton("STEALTH", CORAL);
+        stealthBtn.setOnClickListener(v -> showBlackoutLayout());
+        topBar.addView(stealthBtn, new LinearLayout.LayoutParams(dp(86), dp(42)));
+
+        Button rotBtn = neoButton(ankiOrientationMode == 1 ? "ROT: PORT" : ankiOrientationMode == 2 ? "ROT: LAND" : "ROT: AUTO", BLUE);
+        rotBtn.setOnClickListener(v -> {
+            ankiOrientationMode = (ankiOrientationMode + 1) % 3;
+            saveSettings();
+            applyOrientationPreference();
+            rotBtn.setText(ankiOrientationMode == 1 ? "ROT: PORT" : ankiOrientationMode == 2 ? "ROT: LAND" : "ROT: AUTO");
+        });
+        topBar.addView(rotBtn, new LinearLayout.LayoutParams(dp(94), dp(42)));
 
         addAnkiUtilityButton(topBar, "UNDO", PAPER, this::performAnkiUndo);
         addAnkiUtilityButton(topBar, "REPLAY", YELLOW, () -> sendAnkiText("r"));
@@ -446,7 +591,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             hapBtn.setBackground(interactiveNeoBackground(ankiHapticsOn ? GREEN : PAPER));
             triggerAnkiHaptic(HapticFeedbackConstants.KEYBOARD_TAP);
         });
-        topBar.addView(hapBtn, new LinearLayout.LayoutParams(dp(82), dp(44)));
+        topBar.addView(hapBtn, new LinearLayout.LayoutParams(dp(82), dp(42)));
 
         Button sndBtn = neoButton("SND: " + (ankiSoundOn ? "ON" : "OFF"), ankiSoundOn ? YELLOW : PAPER);
         sndBtn.setOnClickListener(v -> {
@@ -456,58 +601,54 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             sndBtn.setBackground(interactiveNeoBackground(ankiSoundOn ? YELLOW : PAPER));
             if (ankiSoundOn) playSoundTrack(soundFlip);
         });
-        topBar.addView(sndBtn, new LinearLayout.LayoutParams(dp(82), dp(44)));
+        topBar.addView(sndBtn, new LinearLayout.LayoutParams(dp(82), dp(42)));
 
         Button exitBtn = neoButton("EXIT", CORAL);
         exitBtn.setOnClickListener(v -> showInputLayout(false, true));
-        topBar.addView(exitBtn, new LinearLayout.LayoutParams(dp(68), dp(44)));
+        topBar.addView(exitBtn, new LinearLayout.LayoutParams(dp(68), dp(42)));
 
-        main.addView(topBar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(46)));
+        scrollNav.addView(topBar, new LinearLayout.LayoutParams(-2, dp(44)));
+        main.addView(scrollNav, new LinearLayout.LayoutParams(-1, dp(46)));
 
-        // 2. Main Layout Area (Center vs Split)
-        if (ankiLayoutStyle == 0) {
-            // CONCEPT A: CENTER THUMB
+        // 2. Main Rating & Flip Body
+        if (ankiLayoutStyle == 0 || isPortrait) {
+            // CONCEPT A / PORTRAIT BALANCED
             Button flipBtn = neoButton("FLIP / SPACE\n(Vol Down)", YELLOW);
             flipBtn.setTextSize(18);
             flipBtn.setTypeface(Typeface.DEFAULT_BOLD);
             flipBtn.setOnClickListener(v -> performAnkiFlip());
-            LinearLayout.LayoutParams flipParams = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.4f);
+            LinearLayout.LayoutParams flipParams = new LinearLayout.LayoutParams(-1, 0, isPortrait ? 1.5f : 1.3f);
             flipParams.setMargins(0, dp(4), 0, dp(4));
             main.addView(flipBtn, flipParams);
 
-            // Primary Rating Row (Again & Good)
+            // Primary Rating Row
             LinearLayout ratingRow1 = new LinearLayout(this);
             ratingRow1.setOrientation(LinearLayout.HORIZONTAL);
             addLargeRatingButton(ratingRow1, "AGAIN · 1\n(Vol Up)", CORAL, 1.0f, this::performAnkiAgain);
             addLargeRatingButton(ratingRow1, "GOOD · 3\n(Vol Down)", GREEN, 1.0f, this::performAnkiGood);
-            LinearLayout.LayoutParams r1Params = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f);
+            LinearLayout.LayoutParams r1Params = new LinearLayout.LayoutParams(-1, 0, 1.0f);
             r1Params.setMargins(0, dp(2), 0, dp(2));
             main.addView(ratingRow1, r1Params);
 
-            // Secondary Rating Row (Hard & Easy)
+            // Secondary Rating Row
             LinearLayout ratingRow2 = new LinearLayout(this);
             ratingRow2.setOrientation(LinearLayout.HORIZONTAL);
             addLargeRatingButton(ratingRow2, "HARD · 2", PAPER, 1.0f, this::performAnkiHard);
             addLargeRatingButton(ratingRow2, "EASY · 4", BLUE, 1.0f, this::performAnkiEasy);
-            main.addView(ratingRow2, new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+            main.addView(ratingRow2, new LinearLayout.LayoutParams(-1, dp(46)));
         } else {
-            // CONCEPT B: SPLIT ZONE
+            // CONCEPT B (Landscape Split Zone)
             LinearLayout splitContent = new LinearLayout(this);
             splitContent.setOrientation(LinearLayout.HORIZONTAL);
 
-            // Left Side: Full-height FLIP surface
             Button leftFlipBtn = neoButton("FLIP\nSPACE\n\n(Vol Down)", YELLOW);
             leftFlipBtn.setTextSize(20);
             leftFlipBtn.setTypeface(Typeface.DEFAULT_BOLD);
             leftFlipBtn.setOnClickListener(v -> performAnkiFlip());
-            LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.1f);
+            LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(0, -1, 1.1f);
             leftParams.setMargins(0, dp(4), dp(4), 0);
             splitContent.addView(leftFlipBtn, leftParams);
 
-            // Right Side: Vertically Stacked Ratings
             LinearLayout rightRatings = new LinearLayout(this);
             rightRatings.setOrientation(LinearLayout.VERTICAL);
 
@@ -515,7 +656,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             goodBtn.setTextSize(17);
             goodBtn.setTypeface(Typeface.DEFAULT_BOLD);
             goodBtn.setOnClickListener(v -> performAnkiGood());
-            LinearLayout.LayoutParams goodParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.2f);
+            LinearLayout.LayoutParams goodParams = new LinearLayout.LayoutParams(-1, 0, 1.2f);
             goodParams.setMargins(0, dp(4), 0, dp(2));
             rightRatings.addView(goodBtn, goodParams);
 
@@ -523,7 +664,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             againBtn.setTextSize(17);
             againBtn.setTypeface(Typeface.DEFAULT_BOLD);
             againBtn.setOnClickListener(v -> performAnkiAgain());
-            LinearLayout.LayoutParams againParams = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.2f);
+            LinearLayout.LayoutParams againParams = new LinearLayout.LayoutParams(-1, 0, 1.2f);
             againParams.setMargins(0, dp(2), 0, dp(2));
             rightRatings.addView(againBtn, againParams);
 
@@ -531,20 +672,20 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             cornerRow.setOrientation(LinearLayout.HORIZONTAL);
             addLargeRatingButton(cornerRow, "HARD · 2", PAPER, 1.0f, this::performAnkiHard);
             addLargeRatingButton(cornerRow, "EASY · 4", BLUE, 1.0f, this::performAnkiEasy);
-            rightRatings.addView(cornerRow, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(44)));
+            rightRatings.addView(cornerRow, new LinearLayout.LayoutParams(-1, dp(44)));
 
-            splitContent.addView(rightRatings, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.0f));
-            main.addView(splitContent, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1.0f));
+            splitContent.addView(rightRatings, new LinearLayout.LayoutParams(0, -1, 1.0f));
+            main.addView(splitContent, new LinearLayout.LayoutParams(-1, 0, 1.0f));
         }
 
-        outer.addView(main, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1.0f));
+        outer.addView(main, new LinearLayout.LayoutParams(0, -1, 1.0f));
 
         // 3. Permanent Right-Side Scroll Strip
         TextView scrollPad = text("SCROLL\n\n▲\n\n↕\n\n▼", 14);
         scrollPad.setTypeface(Typeface.DEFAULT_BOLD);
         scrollPad.setGravity(Gravity.CENTER);
-        scrollPad.setTextColor(INK);
-        scrollPad.setBackground(rounded(BLUE));
+        scrollPad.setTextColor(ankiOledMode ? PAPER : INK);
+        scrollPad.setBackground(rounded(ankiOledMode ? Color.rgb(20, 50, 95) : BLUE));
         scrollPad.setOnTouchListener(new ScrollPadListener(this));
         scrollPad.setOnHoverListener((view, event) -> {
             if (event.getActionMasked() == MotionEvent.ACTION_HOVER_ENTER) {
@@ -555,7 +696,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
             return false;
         });
 
-        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(dp(74), LinearLayout.LayoutParams.MATCH_PARENT);
+        int stripWidth = isPortrait ? dp(66) : dp(74);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(stripWidth, -1);
         scrollParams.setMargins(dp(4), 0, 0, 0);
         outer.addView(scrollPad, scrollParams);
 
@@ -567,7 +709,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         btn.setTextSize(12);
         btn.setTypeface(Typeface.DEFAULT_BOLD);
         btn.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1.0f);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(76), dp(42));
         params.setMargins(dp(2), 0, dp(2), 0);
         row.addView(btn, params);
     }
@@ -577,7 +719,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         btn.setTextSize(15);
         btn.setTypeface(Typeface.DEFAULT_BOLD);
         btn.setOnClickListener(v -> action.run());
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, weight);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, -1, weight);
         params.setMargins(dp(2), dp(2), dp(2), dp(2));
         row.addView(btn, params);
     }
@@ -622,7 +764,7 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     }
 
     private void performAnkiGood() {
-        sendAnkiSpecialKey("SPACE", 0x2C); // Native Anki: Space on answer side selects Good
+        sendAnkiSpecialKey("SPACE", 0x2C); // Native Anki: Space on answer selects Good
         triggerAnkiHaptic(HapticFeedbackConstants.CONFIRM);
         playSoundTrack(soundGood);
         ankiIsAnswerSide = false;
@@ -913,6 +1055,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         ankiLayoutStyle = values.getInt("anki_layout_style", 0);
         ankiHapticsOn = values.getBoolean("anki_haptics", true);
         ankiSoundOn = values.getBoolean("anki_sound", true);
+        ankiOledMode = values.getBoolean("anki_oled_mode", true);
+        ankiOrientationMode = values.getInt("anki_orientation_mode", 0);
     }
 
     private void saveSettings() {
@@ -929,6 +1073,8 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
                 .putInt("anki_layout_style", ankiLayoutStyle)
                 .putBoolean("anki_haptics", ankiHapticsOn)
                 .putBoolean("anki_sound", ankiSoundOn)
+                .putBoolean("anki_oled_mode", ankiOledMode)
+                .putInt("anki_orientation_mode", ankiOrientationMode)
                 .apply();
     }
 
