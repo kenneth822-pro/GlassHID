@@ -4,9 +4,12 @@
   <img src="https://raw.githubusercontent.com/MooketsiMagwaza/GlassHID/main/docs/images/project-banner.png" alt="GlassHID — your phone is the peripheral" width="100%">
 </p>
 
-A completely local keyboard, mouse, and gamepad for Android. The phone does not
-need Wi-Fi, mobile data, an account, or a cloud service. The first development
-device is a Samsung Galaxy A05s.
+A completely local keyboard, mouse, gamepad, and Anki study remote for Android.
+The phone does not need Wi-Fi, mobile data, an account, or a cloud service. The
+first development device is a Samsung Galaxy A05s. It works with Windows, macOS,
+Linux, and Android tablets or phones (AnkiDroid), with nothing to install on the
+other device. A setup guide walks through permissions and pairing on first launch
+(**SET → SETUP GUIDE** reopens it).
 
 The landscape-only interface uses a compact neo-brutalist keyboard. The full
 keyboard occupies the canvas; **TRACKPAD ▾** opens the mouse surface from the
@@ -139,21 +142,99 @@ most every 10 seconds, so another host can reach the phone in between.
 If the tablet pairs but input never connects, open the phone's entry in the
 tablet's Bluetooth settings and make sure **Input device** is switched on.
 
+### Background input
+
+In Bluetooth mode a foreground service keeps the connection alive while GlassHID
+is in the background or the screen is off. An ongoing notification shows the host
+and has a **Disconnect** button. The service stops itself after 10 minutes in the
+background without a connected host, and starts again when you reopen the app.
+Turn it off with **ANKI → SET ▾ → BACKGROUND INPUT**. On Android 13 and newer the
+notification needs the Notifications permission; the service runs either way.
+
 ## Anki review mode
 
 Tap **ANKI** (or **TOOLS ▾ → ANKI REVIEW**) for a dedicated flashcard remote.
-**FLIP / SPACE** reveals the answer, then **AGAIN · 1**, **HARD · 2**,
-**GOOD · 3**, and **EASY · 4** grade the card. The phone's volume keys work too:
-Volume Down flips and then grades Good, and Volume Up grades Again. The header
-shows the live connection (tap it to open the Pair card) plus Undo, Replay, Mark,
-More, Stealth, and Exit. On the right, the **TAP** pad aims and clicks the
-computer's or tablet's pointer, and the scroll strip below it scrolls long cards.
+Opening it switches an **Off** mode to Bluetooth.
 
-**SET ▾** holds the target (below), the Center/Split layout, rotation (Auto,
-Portrait, Landscape), OLED black, haptics, and sound. Portrait always uses the
-Center layout. Rotating the phone keeps the Bluetooth session open. **STEALTH**
-blacks out the screen: the volume keys still grade cards and swiping anywhere
-scrolls.
+**Header.** The status chip shows the connection, the host's name, and the
+target app; tap it for the Pair card. Then **UNDO**, **REPLAY**, **MARK**,
+**MORE**, **STEALTH**, **POCKET**, **SET ▾**, and **EXIT**. Portrait splits the
+header over two rows.
+
+**Study bar.** Today's reviews with a goal ring, this session's count, pace,
+and Again rate, your streak, and the focus timer. With live Anki desktop info it
+also shows the deck's new, learning, and due counts. Tap it for the study tools.
+**SET ▾ → STUDY BAR** hides it.
+
+**Review buttons.** **SET ▾ → LAYOUT** cycles three layouts:
+
+- **CENTER**: **FLIP / SPACE** on top, **AGAIN · 1** and **GOOD · 3**, then
+  **HARD · 2** and **EASY · 4**.
+- **SPLIT** (landscape): Flip on one side, the grades on the other.
+- **SWIPE**: one big pad. Tap to flip; swipe left for Again, right for Good, up
+  for Easy, down for Hard; hold to undo.
+
+**SET ▾ → HAND: LEFT** mirrors the screen: the TAP/SCROLL column moves to the
+left and Good and Easy sit on the left. On the right (or left), the **TAP** pad
+clicks at the computer's or tablet's pointer (drag it to aim), and the scroll
+strip below it scrolls long cards.
+
+### Volume keys
+
+Volume Down shows the answer, then grades Good. Volume Up grades Again. Holding
+a key runs a shortcut chosen in **SET ▾ → HOLD VOL UP / HOLD VOL DOWN** (Undo
+and Flag red by default; also Mark, Bury, Suspend, Replay, Hard, Easy, Edit, or
+Off). With a hold shortcut set, a short press acts when you let go of the key;
+with **OFF** it acts as soon as you press.
+
+### Pocket mode
+
+Tap **POCKET** to keep reviewing with the screen off or another app open: the
+volume keys stay an Anki remote and each action buzzes (a short tick for flip,
+a double tick for Good, a long buzz for Again). The notification shows pocket mode
+and has **Exit pocket mode**; **POCKET ✓** in the remote also ends it, and it ends
+by itself after 20 minutes without a press. It needs Bluetooth mode. While it runs,
+the phone's volume keys do not change the volume, and GlassHID holds a wake lock
+so every key press is released on time. If another app is playing audio, Android
+may give the volume keys to that app instead.
+
+### Stealth
+
+**STEALTH** blacks out the screen. The volume keys still work, swiping anywhere
+scrolls, and a double-tap anywhere clicks at the pointer.
+
+### Study tools
+
+**SET ▾ → STUDY TOOLS** (or a tap on the study bar) opens:
+
+- This session: cards, minutes, pace, the Again/Hard/Good/Easy split, and the
+  Again rate. Study time caps each gap at one minute, like Anki, so a break does
+  not drag the pace down. A session ends after 30 minutes without an action.
+- Today against your **daily goal** (50 to 1000 cards, or off), your streak, your
+  best day, and a 14-day chart. Reaching the goal buzzes once.
+- A **focus timer**: a focus block (10 to 60 minutes) followed by a break (3 to 20
+  minutes), with a buzz at the end of each. It starts with your first review after
+  you set it, or with **START FOCUS**.
+- An **answer nudge**: a gentle buzz when a question has been showing longer than
+  your limit (8 to 60 seconds, or off).
+- **NEW SESSION** and **CLEAR HISTORY** (tap twice to confirm).
+
+Counts come from remote presses that reached the computer or tablet, so they
+track Anki closely but are not Anki's own records. With live Anki desktop info,
+"today" uses Anki's own count. Everything stays on the phone; history keeps the
+last 120 days.
+
+### Keys
+
+If you changed Anki's or AnkiDroid's shortcuts, **SET ▾ → KEYS…** tells the remote
+which key each action sends. Pick the app at the top, tap an action, choose
+modifiers and a key, and **SAVE**. A dot marks a changed key; **DEFAULT** and
+**RESET ALL** restore the stock shortcuts.
+
+### Other settings
+
+**SET ▾** also holds rotation (Auto, Portrait, Landscape), OLED black, haptics,
+and sound. Rotating the phone keeps the Bluetooth session open.
 
 ### AnkiDroid on a tablet or second phone
 
@@ -236,13 +317,53 @@ the phone never joins a network.
 Run `python windows/usb_input_host.py --check` to verify the cable path without
 injecting any keyboard or mouse events.
 
+### Live Anki desktop info
+
+With the free [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on
+installed in Anki desktop (**Tools → Add-ons → Get Add-ons**, code `2055492159`),
+the USB helper relays what Anki is doing once a second:
+
+- The deck name and its new, learning, and due counts in the study bar.
+- The next interval for each answer on the grade buttons, for example `GOOD · 3  4d`.
+- Anki's own reviewed-today count.
+- When the card changes, the remote's flip/grade state resets, so Volume Down
+  always shows the next answer first.
+
+It talks to AnkiConnect on `127.0.0.1` only. Start the helper with `--no-anki` to
+turn the relay off, or `--anki-url` for a different AnkiConnect address. Live info
+needs the USB helper; Bluetooth HID cannot carry data back to the phone.
+
+## Install and update
+
+Download the APK from the latest run under **Actions** (artifact `GlassHID-debug`)
+or from **Releases**. Since 2.0 every build is signed with the same key, so a new
+APK installs over the previous one and keeps your settings and study history.
+Updating from a 1.x build needs one uninstall first, because those builds were
+signed with a different key each time.
+
+Pushing a tag such as `v2.0.0` builds the app and publishes a GitHub release with
+the APK attached. To sign releases with your own key, create one with
+`keytool -genkeypair -keystore release.jks -alias glasshid -keyalg RSA -keysize 2048 -validity 10000`
+and add these repository secrets: `GLASSHID_KEYSTORE_BASE64` (the file, base64-encoded),
+`GLASSHID_KEYSTORE_PASSWORD`, `GLASSHID_KEY_ALIAS`, and `GLASSHID_KEY_PASSWORD`. Switching
+an installed phone from the debug key to your release key needs one uninstall.
+
 ## Build
 
 This project intentionally uses only Android platform APIs and the Python
 standard library, so its runtime has no third-party dependencies. The Android
 code is split by responsibility: Bluetooth HID, USB transport, feedback,
 neo-brutalist styling, key mapping, controller layout, trackpad gestures, and the
-scroll strip are separate components; `MainActivity` coordinates the screen.
+scroll strip are separate components; `MainActivity` coordinates the screen. The
+Anki remote lives in `AnkiRemote`, backed by small Android-free classes for keys,
+review state, volume gestures, and study statistics. `GlassHid` holds the state the
+activity, the background service, and pocket mode share.
+
+CI runs `gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug`: unit
+tests, Robolectric tests that drive every screen, popup, layout, and mode, and a
+lint check that rejects calls to APIs newer than the minimum SDK. The Windows
+helper's AnkiConnect relay is tested with
+`python -m unittest discover -s windows -p "test_*.py"`.
 
 ## Contributing
 
