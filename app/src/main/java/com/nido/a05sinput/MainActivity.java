@@ -1353,7 +1353,6 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
     public void scroll(int amount) {
         if (mode == MODE_USB) broadcast("SCROLL " + amount);
         else if (mode == MODE_BLUETOOTH) sendBluetoothMouse(mouseButtons, 0, 0, amount);
-        if (ankiActive) triggerAnkiHaptic(HapticFeedbackConstants.CLOCK_TICK);
     }
 
     private void click(String which) {
