@@ -113,6 +113,24 @@ while the phone is visible if the normal Add device screen does not find the pho
 
 Keep the app in the foreground while using the phone as a trackpad.
 
+If a connection attempt hangs, the app drops the stuck request after about ten
+seconds and retries; if it keeps hanging, it re-registers its HID service
+automatically. Tapping **CONNECT INPUT** also clears a stuck attempt.
+
+## Anki review mode
+
+Tap **ANKI** (or **TOOLS ▾ → ANKI REVIEW**) for a dedicated flashcard remote.
+**FLIP / SPACE** reveals the answer, then **AGAIN · 1**, **HARD · 2**,
+**GOOD · 3**, and **EASY · 4** grade the card. The phone's volume keys work too:
+Volume Down flips and then grades Good, and Volume Up grades Again. The header
+shows the live connection (tap it to open the Pair card) plus Undo, Replay, Mark,
+More, Stealth, and Exit. The scroll strip on the right scrolls long cards.
+
+**SET ▾** holds the Center/Split layout, rotation (Auto, Portrait, Landscape),
+OLED black, haptics, and sound. Portrait always uses the Center layout.
+Rotating the phone keeps the Bluetooth session open. **STEALTH** blacks out the
+screen: the volume keys still grade cards and swiping anywhere scrolls.
+
 ## System controls and laptop battery
 
 Open **TOOLS ▾ → SYSTEM** for volume down/mute/up and brightness down/up controls.

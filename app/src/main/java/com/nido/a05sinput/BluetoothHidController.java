@@ -38,6 +38,9 @@ final class BluetoothHidController {
             "05091901291015002501750195108102" +
             "05010939150025073500463B016514750495018142" +
             "6500750495018101C0");
+    /** A connect that never leaves CONNECTING blocks every later request. */
+    private static final long CONNECT_STUCK_MS = 10000;
+    private static final long REREGISTER_MIN_INTERVAL_MS = 30000;
 
     private final Activity activity;
     private final Handler handler;
@@ -55,6 +58,9 @@ final class BluetoothHidController {
     private boolean destroyed;
     private int connectionState = BluetoothProfile.STATE_DISCONNECTED;
     private long lastConnectRequestAt;
+    private long connectingSince;
+    private int stuckConnects;
+    private long lastReregisterAt;
     private long nextReportAt;
 
     BluetoothHidController(Activity activity, Handler handler, Listener listener) {
@@ -116,6 +122,20 @@ final class BluetoothHidController {
     void connect(BluetoothDevice device) {
         rememberHost(device);
         active = true;
+        // A manual tap must not wait behind a half-open request; drop it so the
+        // next attempt starts clean instead of reporting CONNECTING forever.
+        if (hid != null && registered && !isConnectedTo(device)) {
+            if (connectedHost != null && !connectedHost.equals(device)) {
+                hid.disconnect(connectedHost);
+                connectedHost = null;
+            }
+            if (hid.getConnectionState(device) == BluetoothProfile.STATE_CONNECTING) {
+                hid.disconnect(device);
+                connectionState = BluetoothProfile.STATE_DISCONNECTED;
+            }
+            lastConnectRequestAt = 0;
+            connectingSince = 0;
+        }
         ensureReady();
     }
 
@@ -221,7 +241,7 @@ final class BluetoothHidController {
 
     void destroy() {
         destroyed = true;
-        if (hid != null && registered) hid.unregisterApp();
+        if (hid != null && (registered || registrationPending)) hid.unregisterApp();
         if (adapter != null && hid != null)
             adapter.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid);
     }
@@ -269,10 +289,12 @@ final class BluetoothHidController {
                         Log.d(TAG, "Bluetooth HID state=" + state + " host=" + safeName(device));
                         boolean wasConnected = isInputLive();
                         connectionState = state;
+                        if (state != BluetoothProfile.STATE_CONNECTING) connectingSince = 0;
                         if (state == BluetoothProfile.STATE_CONNECTED) {
                             connectedHost = device;
                             rememberHost(device);
                             recoveryScheduled = false;
+                            stuckConnects = 0;
                             if (!wasConnected) listener.onInputConnected(safeName(device));
                         } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                             if (device.equals(connectedHost)) connectedHost = null;
@@ -284,6 +306,9 @@ final class BluetoothHidController {
         if (!requested) {
             registrationPending = false;
             Log.w(TAG, "Bluetooth HID app registration was rejected");
+            // A registration left behind by an earlier instance, or one whose
+            // callback was lost, rejects every new request. Clear ours and retry.
+            hid.unregisterApp();
             scheduleRecovery();
         } else {
             handler.postDelayed(() -> {
@@ -307,22 +332,55 @@ final class BluetoothHidController {
         connectionState = hid.getConnectionState(preferred);
         if (connectionState == BluetoothProfile.STATE_CONNECTED) {
             connectedHost = preferred;
+            connectingSince = 0;
             notifyChanged();
             return;
         }
         long now = SystemClock.uptimeMillis();
         if (connectionState == BluetoothProfile.STATE_CONNECTING ||
-                now - lastConnectRequestAt < 3500) {
+                connectionState == BluetoothProfile.STATE_DISCONNECTING) {
+            if (connectingSince == 0) connectingSince = now;
+            else if (now - connectingSince >= CONNECT_STUCK_MS) recoverStuckConnect(preferred);
+            notifyChanged();
+            scheduleRecovery();
+            return;
+        }
+        connectingSince = 0;
+        if (now - lastConnectRequestAt < 3500) {
             notifyChanged();
             scheduleRecovery();
             return;
         }
         lastConnectRequestAt = now;
         Log.d(TAG, "Connecting preferred HID host " + safeName(preferred));
-        if (hid.connect(preferred)) connectionState = BluetoothProfile.STATE_CONNECTING;
-        else Log.w(TAG, "Bluetooth HID connect request was rejected");
+        if (hid.connect(preferred)) {
+            connectionState = BluetoothProfile.STATE_CONNECTING;
+            connectingSince = now;
+        } else {
+            Log.w(TAG, "Bluetooth HID connect request was rejected");
+        }
         notifyChanged();
         scheduleRecovery();
+    }
+
+    /** Drops a link stuck in CONNECTING; if that keeps happening, re-registers HID. */
+    private void recoverStuckConnect(BluetoothDevice host) {
+        Log.w(TAG, "Bluetooth HID connect to " + safeName(host) + " is stuck; resetting");
+        connectingSince = 0;
+        lastConnectRequestAt = 0;
+        stuckConnects++;
+        hid.disconnect(host);
+        connectionState = BluetoothProfile.STATE_DISCONNECTED;
+        long now = SystemClock.uptimeMillis();
+        if (stuckConnects >= 2 && now - lastReregisterAt >= REREGISTER_MIN_INTERVAL_MS) {
+            stuckConnects = 0;
+            lastReregisterAt = now;
+            Log.w(TAG, "Re-registering Bluetooth HID app");
+            registered = false;
+            registrationPending = false;
+            connectedHost = null;
+            hid.unregisterApp();
+        }
     }
 
     private BluetoothDevice preferredHost() {
