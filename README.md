@@ -117,6 +117,28 @@ If a connection attempt hangs, the app drops the stuck request after about ten
 seconds and retries; if it keeps hanging, it re-registers its HID service
 automatically. Tapping **CONNECT INPUT** also clears a stuck attempt.
 
+### Android tablets and phones as the host
+
+The same Bluetooth input works with another Android device, because Android
+accepts Bluetooth keyboards and mice natively. Nothing needs to be installed
+on the tablet.
+
+1. In GlassHID, tap **PAIR → MAKE PHONE VISIBLE**.
+2. On the tablet, open **Settings → Bluetooth → Pair new device** and pick the phone.
+   Confirm the pairing code on both devices.
+3. A computer or tablet paired within five minutes of **MAKE PHONE VISIBLE**
+   becomes the active host automatically. Otherwise tap **CONNECT INPUT · tablet**
+   in the Pair card.
+
+The phone serves one host at a time. The Pair card lists the live host first,
+then the last-used one, then other computers and tablets. Tap a different device
+to switch: the phone drops the old link before connecting the new one. While
+the last-used host is away, reconnect attempts slow from every 3.5 seconds to at
+most every 10 seconds, so another host can reach the phone in between.
+
+If the tablet pairs but input never connects, open the phone's entry in the
+tablet's Bluetooth settings and make sure **Input device** is switched on.
+
 ## Anki review mode
 
 Tap **ANKI** (or **TOOLS ▾ → ANKI REVIEW**) for a dedicated flashcard remote.
@@ -126,10 +148,48 @@ Volume Down flips and then grades Good, and Volume Up grades Again. The header
 shows the live connection (tap it to open the Pair card) plus Undo, Replay, Mark,
 More, Stealth, and Exit. The scroll strip on the right scrolls long cards.
 
-**SET ▾** holds the Center/Split layout, rotation (Auto, Portrait, Landscape),
-OLED black, haptics, and sound. Portrait always uses the Center layout.
-Rotating the phone keeps the Bluetooth session open. **STEALTH** blacks out the
-screen: the volume keys still grade cards and swiping anywhere scrolls.
+**SET ▾** holds the target (below), the Center/Split layout, rotation (Auto,
+Portrait, Landscape), OLED black, haptics, and sound. Portrait always uses the
+Center layout. Rotating the phone keeps the Bluetooth session open. **STEALTH**
+blacks out the screen: the volume keys still grade cards and swiping anywhere
+scrolls.
+
+### AnkiDroid on a tablet or second phone
+
+The remote drives Anki desktop on a PC or AnkiDroid on another Android device.
+**SET ▾ → TARGET** chooses between them. **AUTO** (the default) picks AnkiDroid
+when the connected host reports itself as a phone or tablet, and Anki desktop
+otherwise. USB mode always drives the PC. The header chip shows the host and
+the target in use, for example `Galaxy Tab S9 · ANKIDROID (AUTO)`.
+
+Both apps share the same default review shortcuts, so every review button works
+the same way:
+
+| Button | Key sent | Anki desktop | AnkiDroid |
+| --- | --- | --- | --- |
+| FLIP / SPACE, Volume Down | Space | Show answer, then Good | Show answer, then Good |
+| AGAIN / HARD / GOOD / EASY | 1 / 2 / 3 / 4 | Grade | Grade |
+| UNDO | Ctrl+Z | Undo | Undo |
+| REPLAY | R | Replay audio | Replay audio |
+| MARK | * | Mark note | Mark note |
+| Scroll strip | Mouse wheel | Scroll card | Scroll card |
+| MORE | M (desktop) | More menu | — |
+| MORE ▾ (AnkiDroid) | -, =, @, !, Ctrl+1–4, E, Ctrl+Shift+Z | — | Bury, suspend, flag, edit, redo |
+
+AnkiDroid has no **M** "More" shortcut, so with the AnkiDroid target **MORE ▾**
+opens a panel on the phone. It offers bury card/note, suspend card/note, red,
+orange, green, and blue flags, edit note, and redo. These are AnkiDroid's default
+shortcuts and work in both its classic and new study screens.
+
+Notes for AnkiDroid:
+
+- Scrolling uses the mouse wheel, so the tablet may briefly show a mouse pointer.
+  The card scrolls wherever that pointer sits, which starts at the screen centre.
+- The `*`, `@`, `!`, `=`, and `-` shortcuts assume the tablet's physical
+  keyboard layout is English (US), which is Android's default.
+- If you changed AnkiDroid's key bindings (**Settings → Controls**), the remote
+  sends the default keys listed above.
+- On "type in the answer" cards, keys go to the answer field until it is submitted.
 
 ## System controls and laptop battery
 

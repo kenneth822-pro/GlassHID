@@ -3,11 +3,15 @@ package com.nido.a05sinput;
 import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothHidDevice;
 import android.bluetooth.BluetoothHidDeviceAppSdpSettings;
 import android.bluetooth.BluetoothProfile;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
@@ -41,6 +45,14 @@ final class BluetoothHidController {
     /** A connect that never leaves CONNECTING blocks every later request. */
     private static final long CONNECT_STUCK_MS = 10000;
     private static final long REREGISTER_MIN_INTERVAL_MS = 30000;
+    /** Lets the stack drop the old host's link before the new host is paged. */
+    private static final long SWITCH_SETTLE_MS = 900;
+    /** Gives a host that just paired a moment to open the HID link itself. */
+    private static final long NEW_HOST_SETTLE_MS = 2500;
+    /** A device paired this soon after MAKE PHONE VISIBLE becomes the host. */
+    private static final long PAIRING_WINDOW_MS = 5 * 60 * 1000;
+    /** Bluetooth assigned number for Computer: Tablet; the SDK has no constant for it. */
+    private static final int COMPUTER_TABLET = 0x011C;
 
     private final Activity activity;
     private final Handler handler;
@@ -61,7 +73,27 @@ final class BluetoothHidController {
     private long connectingSince;
     private int stuckConnects;
     private long lastReregisterAt;
+    private int failedConnects;
+    private BluetoothDevice pendingHost;
+    private long expectNewHostUntil;
+    private boolean bondReceiverRegistered;
     private long nextReportAt;
+
+    private final BroadcastReceiver bondReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (!BluetoothDevice.ACTION_BOND_STATE_CHANGED.equals(intent.getAction())) return;
+            notifyChanged();
+            BluetoothDevice device = deviceExtra(intent);
+            int state = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE);
+            if (state != BluetoothDevice.BOND_BONDED || device == null || destroyed || !active ||
+                    SystemClock.uptimeMillis() > expectNewHostUntil || !looksLikeHost(device)) return;
+            // Pairing began from MAKE PHONE VISIBLE: switch to the new computer or tablet
+            // instead of paging the previous host, which would block its connection.
+            expectNewHostUntil = 0;
+            pendingHost = device;
+            handler.postDelayed(BluetoothHidController.this::ensureReady, NEW_HOST_SETTLE_MS);
+        }
+    };
 
     BluetoothHidController(Activity activity, Handler handler, Listener listener) {
         this.activity = activity;
@@ -92,6 +124,7 @@ final class BluetoothHidController {
             return;
         }
         binding = true;
+        registerBondReceiver();
         boolean requested = adapter.getProfileProxy(activity,
                 new BluetoothProfile.ServiceListener() {
                     @Override public void onServiceConnected(int profile, BluetoothProfile proxy) {
@@ -120,23 +153,76 @@ final class BluetoothHidController {
     }
 
     void connect(BluetoothDevice device) {
-        rememberHost(device);
         active = true;
-        // A manual tap must not wait behind a half-open request; drop it so the
-        // next attempt starts clean instead of reporting CONNECTING forever.
-        if (hid != null && registered && !isConnectedTo(device)) {
-            if (connectedHost != null && !connectedHost.equals(device)) {
-                hid.disconnect(connectedHost);
-                connectedHost = null;
-            }
-            if (hid.getConnectionState(device) == BluetoothProfile.STATE_CONNECTING) {
-                hid.disconnect(device);
-                connectionState = BluetoothProfile.STATE_DISCONNECTED;
-            }
-            lastConnectRequestAt = 0;
-            connectingSince = 0;
+        if (switchHost(device, true)) handler.postDelayed(this::ensureReady, SWITCH_SETTLE_MS);
+        else ensureReady();
+    }
+
+    /** Opens a short window in which a newly paired computer or tablet becomes the host. */
+    void expectNewHost() {
+        expectNewHostUntil = SystemClock.uptimeMillis() + PAIRING_WINDOW_MS;
+    }
+
+    /** The live host, or the remembered one while reconnecting. */
+    BluetoothDevice currentHost() {
+        return isInputLive() ? connectedHost : preferredHost();
+    }
+
+    /** True for hosts that look like a phone or tablet (AnkiDroid) rather than a computer. */
+    boolean isMobileHost(BluetoothDevice device) {
+        BluetoothClass type = deviceClass(device);
+        if (type == null) return false;
+        if (type.getMajorDeviceClass() == BluetoothClass.Device.Major.PHONE) return true;
+        int kind = type.getDeviceClass();
+        return kind == BluetoothClass.Device.COMPUTER_HANDHELD_PC_PDA ||
+                kind == BluetoothClass.Device.COMPUTER_PALM_SIZE_PC_PDA ||
+                kind == BluetoothClass.Device.COMPUTER_WEARABLE ||
+                kind == COMPUTER_TABLET;
+    }
+
+    /** Computers, phones, and tablets can be HID hosts; earbuds, watches, and keyboards cannot. */
+    boolean looksLikeHost(BluetoothDevice device) {
+        BluetoothClass type = deviceClass(device);
+        if (type == null) return false;
+        int major = type.getMajorDeviceClass();
+        return major == BluetoothClass.Device.Major.COMPUTER ||
+                major == BluetoothClass.Device.Major.PHONE;
+    }
+
+    /**
+     * Makes {@code device} the host and drops links or pending requests to any other one:
+     * the phone serves one host at a time, and paging the old host blocks the new one.
+     *
+     * @param manual a user tap also clears a half-open request to {@code device} itself
+     * @return true when a link was dropped and the stack needs a moment to settle
+     */
+    private boolean switchHost(BluetoothDevice device, boolean manual) {
+        BluetoothDevice previous = preferredHost();
+        rememberHost(device);
+        failedConnects = 0;
+        lastConnectRequestAt = 0;
+        connectingSince = 0;
+        if (hid == null || !registered || isConnectedTo(device)) return false;
+        boolean dropped = false;
+        if (connectedHost != null && !connectedHost.equals(device)) {
+            hid.disconnect(connectedHost);
+            dropped = true;
         }
-        ensureReady();
+        if (previous != null && !previous.equals(device) && !previous.equals(connectedHost)) {
+            int state = hid.getConnectionState(previous);
+            if (state == BluetoothProfile.STATE_CONNECTING ||
+                    state == BluetoothProfile.STATE_CONNECTED) {
+                hid.disconnect(previous);
+                dropped = true;
+            }
+        }
+        if (manual && hid.getConnectionState(device) == BluetoothProfile.STATE_CONNECTING) {
+            hid.disconnect(device);
+            dropped = true;
+        }
+        connectedHost = null;
+        connectionState = BluetoothProfile.STATE_DISCONNECTED;
+        return dropped;
     }
 
     Set<BluetoothDevice> bondedDevices() {
@@ -166,11 +252,11 @@ final class BluetoothHidController {
     String detailedStatus() {
         if (!hasPermission()) return "NEARBY DEVICES PERMISSION NEEDED";
         if (isInputLive()) return "INPUT CONNECTED ✓\n" + safeName(connectedHost);
-        if (preferredHost() == null) return "NOT PAIRED · USE WINDOWS ADD DEVICE";
+        if (preferredHost() == null) return "NOT PAIRED\nPair from your PC or tablet";
         if (!registered) return "PAIRED · STARTING INPUT SERVICE…";
         if (connectionState == BluetoothProfile.STATE_CONNECTING)
-            return "PAIRED · CONNECTING INPUT…";
-        return "PAIRED · INPUT OFFLINE\nTap CONNECT INPUT below";
+            return "CONNECTING INPUT…\n" + safeName(preferredHost());
+        return "PAIRED · INPUT OFFLINE\nTap a device below to connect";
     }
 
     String safeName(BluetoothDevice device) {
@@ -241,6 +327,14 @@ final class BluetoothHidController {
 
     void destroy() {
         destroyed = true;
+        if (bondReceiverRegistered) {
+            try {
+                activity.unregisterReceiver(bondReceiver);
+            } catch (IllegalArgumentException ignored) {
+                // Already unregistered.
+            }
+            bondReceiverRegistered = false;
+        }
         if (hid != null && (registered || registrationPending)) hid.unregisterApp();
         if (adapter != null && hid != null)
             adapter.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid);
@@ -250,6 +344,15 @@ final class BluetoothHidController {
         if (destroyed || !foreground || !active || !hasPermission()) return;
         if (hid == null) bind();
         else if (!registered) registerApp();
+        else if (pendingHost != null) adoptPendingHost();
+        else connectPreferredHost();
+    }
+
+    private void adoptPendingHost() {
+        BluetoothDevice host = pendingHost;
+        pendingHost = null;
+        Log.d(TAG, "Using newly paired host " + safeName(host));
+        if (switchHost(host, false)) handler.postDelayed(this::ensureReady, SWITCH_SETTLE_MS);
         else connectPreferredHost();
     }
 
@@ -267,9 +370,13 @@ final class BluetoothHidController {
                         registrationPending = false;
                         registered = isRegistered;
                         Log.d(TAG, "Bluetooth HID app registered=" + isRegistered);
-                        if (plugged != null) rememberHost(plugged);
                         if (isRegistered) {
-                            BluetoothDevice candidate = plugged != null ? plugged : preferredHost();
+                            // Keep the host the user chose unless the stack reports a live link.
+                            boolean pluggedLive = plugged != null && hid != null &&
+                                    hid.getConnectionState(plugged) == BluetoothProfile.STATE_CONNECTED;
+                            if (plugged != null && (pluggedLive || preferredHost() == null))
+                                rememberHost(plugged);
+                            BluetoothDevice candidate = pluggedLive ? plugged : preferredHost();
                             connectionState = candidate == null || hid == null
                                     ? BluetoothProfile.STATE_DISCONNECTED
                                     : hid.getConnectionState(candidate);
@@ -288,6 +395,12 @@ final class BluetoothHidController {
                                                                     int state) {
                         Log.d(TAG, "Bluetooth HID state=" + state + " host=" + safeName(device));
                         boolean wasConnected = isInputLive();
+                        if (state != BluetoothProfile.STATE_CONNECTED &&
+                                !device.equals(connectedHost) && !device.equals(preferredHost())) {
+                            // A host we already switched away from is still winding down.
+                            notifyChanged();
+                            return;
+                        }
                         connectionState = state;
                         if (state != BluetoothProfile.STATE_CONNECTING) connectingSince = 0;
                         if (state == BluetoothProfile.STATE_CONNECTED) {
@@ -295,9 +408,11 @@ final class BluetoothHidController {
                             rememberHost(device);
                             recoveryScheduled = false;
                             stuckConnects = 0;
+                            failedConnects = 0;
                             if (!wasConnected) listener.onInputConnected(safeName(device));
                         } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                             if (device.equals(connectedHost)) connectedHost = null;
+                            else if (!wasConnected) failedConnects++;
                             scheduleRecovery();
                         }
                         notifyChanged();
@@ -346,7 +461,7 @@ final class BluetoothHidController {
             return;
         }
         connectingSince = 0;
-        if (now - lastConnectRequestAt < 3500) {
+        if (now - lastConnectRequestAt < connectRetryMs()) {
             notifyChanged();
             scheduleRecovery();
             return;
@@ -357,10 +472,46 @@ final class BluetoothHidController {
             connectionState = BluetoothProfile.STATE_CONNECTING;
             connectingSince = now;
         } else {
+            failedConnects++;
             Log.w(TAG, "Bluetooth HID connect request was rejected");
         }
         notifyChanged();
         scheduleRecovery();
+    }
+
+    /**
+     * Retries slow down while the host is away, leaving gaps in which another computer
+     * or tablet can open its own connection to the phone.
+     */
+    private long connectRetryMs() {
+        return failedConnects < 3 ? 3500 : failedConnects < 6 ? 6000 : 10000;
+    }
+
+    private BluetoothClass deviceClass(BluetoothDevice device) {
+        if (device == null || !hasPermission()) return null;
+        try {
+            return device.getBluetoothClass();
+        } catch (SecurityException e) {
+            return null;
+        }
+    }
+
+    private void registerBondReceiver() {
+        if (bondReceiverRegistered) return;
+        IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        if (Build.VERSION.SDK_INT >= 33) {
+            activity.registerReceiver(bondReceiver, filter, Context.RECEIVER_EXPORTED);
+        } else {
+            activity.registerReceiver(bondReceiver, filter);
+        }
+        bondReceiverRegistered = true;
+    }
+
+    @SuppressWarnings("deprecation")
+    private static BluetoothDevice deviceExtra(Intent intent) {
+        if (Build.VERSION.SDK_INT >= 33)
+            return intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice.class);
+        return intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
     }
 
     /** Drops a link stuck in CONNECTING; if that keeps happening, re-registers HID. */
