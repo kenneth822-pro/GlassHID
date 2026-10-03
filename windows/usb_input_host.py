@@ -15,6 +15,8 @@ import time
 import winsound
 from pathlib import Path
 
+import anki_live
+
 PORT = 27183
 DEFAULT_ADB = Path.home() / "AppData/Local/Android/Sdk/platform-tools/adb.exe"
 
@@ -42,6 +44,11 @@ VK = {
     "F9": 0x78, "F10": 0x79, "F11": 0x7A, "F12": 0x7B,
 }
 MODIFIER_VK = {"CTRL": 0x11, "SHIFT": 0x10, "ALT": 0x12, "WIN": 0x5B}
+# US-layout punctuation keys, so shortcuts such as Ctrl+- can be sent as HOTKEY commands.
+OEM_VK = {
+    "-": 0xBD, "=": 0xBB, "[": 0xDB, "]": 0xDD, "\\": 0xDC, ";": 0xBA,
+    "'": 0xDE, "`": 0xC0, ",": 0xBC, ".": 0xBE, "/": 0xBF,
+}
 
 
 class KEYBDINPUT(ctypes.Structure):
@@ -98,12 +105,33 @@ Invoke-CimMethod -InputObject $method -MethodName WmiSetBrightness -Arguments @{
     )
 
 
-def telemetry_loop(connection: socket.socket, stop: threading.Event) -> None:
+class LineSender:
+    """Serialises writes from the telemetry threads so lines never interleave."""
+
+    def __init__(self, connection: socket.socket) -> None:
+        self.connection = connection
+        self.lock = threading.Lock()
+
+    def __call__(self, line: str) -> None:
+        with self.lock:
+            self.connection.sendall(line.encode("utf-8"))
+
+
+def telemetry_loop(send: LineSender, stop: threading.Event) -> None:
     while not stop.wait(2.0):
         try:
             battery, plugged = battery_status()
-            line = f"BATTERY {battery} {plugged}\n"
-            connection.sendall(line.encode("ascii"))
+            send(f"BATTERY {battery} {plugged}\n")
+        except (ConnectionError, OSError):
+            return
+
+
+def anki_loop(send: LineSender, stop: threading.Event, url: str) -> None:
+    """Relays live Anki desktop state (deck, due counts, next intervals) once a second."""
+    relay = anki_live.LiveRelay(anki_live.AnkiConnect(url), send)
+    while not stop.wait(1.0):
+        try:
+            relay.step(time.monotonic())
         except (ConnectionError, OSError):
             return
 
@@ -135,6 +163,8 @@ def send_hotkey(chord: str) -> None:
     key_code = VK.get(key_name)
     if key_code is None and len(key_name) == 1 and key_name.isalnum():
         key_code = ord(key_name.upper())
+    if key_code is None:
+        key_code = OEM_VK.get(key_name)
     if key_code is None:
         return
     for code in modifier_codes:
@@ -215,6 +245,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--adb", type=Path, default=DEFAULT_ADB)
     parser.add_argument("--check", action="store_true", help="Verify the USB link without injecting input")
+    parser.add_argument("--no-anki", action="store_true",
+                        help="Do not relay live Anki desktop info from the AnkiConnect add-on")
+    parser.add_argument("--anki-url", default=anki_live.DEFAULT_URL, help="AnkiConnect address")
     args = parser.parse_args()
 
     configure_adb(args.adb)
@@ -231,12 +264,14 @@ def main() -> int:
                     if args.check:
                         return 0
                     telemetry_stop = threading.Event()
-                    telemetry = threading.Thread(
-                        target=telemetry_loop,
-                        args=(connection, telemetry_stop),
-                        daemon=True,
-                    )
-                    telemetry.start()
+                    send = LineSender(connection)
+                    threading.Thread(
+                        target=telemetry_loop, args=(send, telemetry_stop), daemon=True,
+                    ).start()
+                    if not args.no_anki:
+                        threading.Thread(
+                            target=anki_loop, args=(send, telemetry_stop, args.anki_url), daemon=True,
+                        ).start()
                     try:
                         for line in incoming:
                             handle(line, dry_run=False)

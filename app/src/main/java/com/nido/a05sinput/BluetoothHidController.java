@@ -1,7 +1,6 @@
 package com.nido.a05sinput;
 
 import android.Manifest;
-import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
@@ -19,9 +18,15 @@ import android.os.SystemClock;
 import android.util.Log;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
-/** Owns Bluetooth HID registration, connection recovery, and report delivery. */
+/**
+ * Owns Bluetooth HID registration, connection recovery, and report delivery. It lives in the
+ * process-wide {@link GlassHid} runtime rather than in the activity, so the foreground
+ * service can keep a host connected while the app is in the background or the screen is off.
+ */
 final class BluetoothHidController {
     interface Listener {
         void onStateChanged();
@@ -54,9 +59,9 @@ final class BluetoothHidController {
     /** Bluetooth assigned number for Computer: Tablet; the SDK has no constant for it. */
     private static final int COMPUTER_TABLET = 0x011C;
 
-    private final Activity activity;
+    private final Context context;
     private final Handler handler;
-    private final Listener listener;
+    private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final BluetoothAdapter adapter;
 
     private BluetoothHidDevice hid;
@@ -95,15 +100,26 @@ final class BluetoothHidController {
         }
     };
 
-    BluetoothHidController(Activity activity, Handler handler, Listener listener) {
-        this.activity = activity;
+    BluetoothHidController(Context context, Handler handler) {
+        this.context = context.getApplicationContext();
         this.handler = handler;
-        this.listener = listener;
         this.adapter = BluetoothAdapter.getDefaultAdapter();
     }
 
+    void addListener(Listener listener) {
+        if (!listeners.contains(listener)) listeners.add(listener);
+    }
+
+    void removeListener(Listener listener) {
+        listeners.remove(listener);
+    }
+
+    boolean isDestroyed() {
+        return destroyed;
+    }
+
     boolean hasPermission() {
-        return Build.VERSION.SDK_INT < 31 || activity.checkSelfPermission(
+        return Build.VERSION.SDK_INT < 31 || context.checkSelfPermission(
                 Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
     }
 
@@ -125,7 +141,9 @@ final class BluetoothHidController {
         }
         binding = true;
         registerBondReceiver();
-        boolean requested = adapter.getProfileProxy(activity,
+        boolean requested;
+        try {
+            requested = adapter.getProfileProxy(context,
                 new BluetoothProfile.ServiceListener() {
                     @Override public void onServiceConnected(int profile, BluetoothProfile proxy) {
                         binding = false;
@@ -145,9 +163,15 @@ final class BluetoothHidController {
                         scheduleRecovery();
                     }
                 }, BluetoothProfile.HID_DEVICE);
+        } catch (RuntimeException e) {
+            // A revoked permission or a vendor stack that refuses: report, never crash.
+            Log.w(TAG, "Bluetooth HID profile bind failed", e);
+            requested = false;
+        }
         if (!requested) {
             binding = false;
             Log.w(TAG, "Bluetooth HID profile bind was rejected");
+            notifyChanged();
             scheduleRecovery();
         }
     }
@@ -205,19 +229,19 @@ final class BluetoothHidController {
         if (hid == null || !registered || isConnectedTo(device)) return false;
         boolean dropped = false;
         if (connectedHost != null && !connectedHost.equals(device)) {
-            hid.disconnect(connectedHost);
+            disconnectHost(connectedHost);
             dropped = true;
         }
         if (previous != null && !previous.equals(device) && !previous.equals(connectedHost)) {
-            int state = hid.getConnectionState(previous);
+            int state = connectionStateOf(previous);
             if (state == BluetoothProfile.STATE_CONNECTING ||
                     state == BluetoothProfile.STATE_CONNECTED) {
-                hid.disconnect(previous);
+                disconnectHost(previous);
                 dropped = true;
             }
         }
-        if (manual && hid.getConnectionState(device) == BluetoothProfile.STATE_CONNECTING) {
-            hid.disconnect(device);
+        if (manual && connectionStateOf(device) == BluetoothProfile.STATE_CONNECTING) {
+            disconnectHost(device);
             dropped = true;
         }
         connectedHost = null;
@@ -227,7 +251,13 @@ final class BluetoothHidController {
 
     Set<BluetoothDevice> bondedDevices() {
         if (!hasPermission() || adapter == null) return Collections.emptySet();
-        return adapter.getBondedDevices();
+        try {
+            Set<BluetoothDevice> devices = adapter.getBondedDevices();
+            return devices == null ? Collections.<BluetoothDevice>emptySet() : devices;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not list paired devices", e);
+            return Collections.emptySet();
+        }
     }
 
     boolean isConnectedTo(BluetoothDevice device) {
@@ -261,8 +291,12 @@ final class BluetoothHidController {
 
     String safeName(BluetoothDevice device) {
         if (device == null || !hasPermission()) return "paired host";
-        String name = device.getName();
-        return name == null ? device.getAddress() : name;
+        try {
+            String name = device.getName();
+            return name == null ? device.getAddress() : name;
+        } catch (RuntimeException e) {
+            return "paired host";
+        }
     }
 
     void sendKey(int modifier, int usage) {
@@ -329,15 +363,19 @@ final class BluetoothHidController {
         destroyed = true;
         if (bondReceiverRegistered) {
             try {
-                activity.unregisterReceiver(bondReceiver);
+                context.unregisterReceiver(bondReceiver);
             } catch (IllegalArgumentException ignored) {
                 // Already unregistered.
             }
             bondReceiverRegistered = false;
         }
-        if (hid != null && (registered || registrationPending)) hid.unregisterApp();
-        if (adapter != null && hid != null)
-            adapter.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid);
+        if (registered || registrationPending) unregisterSafely();
+        try {
+            if (adapter != null && hid != null)
+                adapter.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not close the HID profile", e);
+        }
     }
 
     private void ensureReady() {
@@ -363,7 +401,9 @@ final class BluetoothHidController {
         BluetoothHidDeviceAppSdpSettings sdp = new BluetoothHidDeviceAppSdpSettings(
                 "GlassHID", "Offline keyboard, mouse, and gamepad", "Local", (byte) 0xC0,
                 HID_DESCRIPTOR);
-        boolean requested = hid.registerApp(sdp, null, null, activity.getMainExecutor(),
+        boolean requested;
+        try {
+            requested = hid.registerApp(sdp, null, null, context.getMainExecutor(),
                 new BluetoothHidDevice.Callback() {
                     @Override public void onAppStatusChanged(BluetoothDevice plugged,
                                                               boolean isRegistered) {
@@ -372,14 +412,14 @@ final class BluetoothHidController {
                         Log.d(TAG, "Bluetooth HID app registered=" + isRegistered);
                         if (isRegistered) {
                             // Keep the host the user chose unless the stack reports a live link.
-                            boolean pluggedLive = plugged != null && hid != null &&
-                                    hid.getConnectionState(plugged) == BluetoothProfile.STATE_CONNECTED;
+                            boolean pluggedLive = plugged != null &&
+                                    connectionStateOf(plugged) == BluetoothProfile.STATE_CONNECTED;
                             if (plugged != null && (pluggedLive || preferredHost() == null))
                                 rememberHost(plugged);
                             BluetoothDevice candidate = pluggedLive ? plugged : preferredHost();
-                            connectionState = candidate == null || hid == null
+                            connectionState = candidate == null
                                     ? BluetoothProfile.STATE_DISCONNECTED
-                                    : hid.getConnectionState(candidate);
+                                    : connectionStateOf(candidate);
                             connectedHost = connectionState == BluetoothProfile.STATE_CONNECTED
                                     ? candidate : null;
                             connectPreferredHost();
@@ -409,7 +449,10 @@ final class BluetoothHidController {
                             recoveryScheduled = false;
                             stuckConnects = 0;
                             failedConnects = 0;
-                            if (!wasConnected) listener.onInputConnected(safeName(device));
+                            if (!wasConnected) {
+                                String name = safeName(device);
+                                for (Listener listener : listeners) listener.onInputConnected(name);
+                            }
                         } else if (state == BluetoothProfile.STATE_DISCONNECTED) {
                             if (device.equals(connectedHost)) connectedHost = null;
                             else if (!wasConnected) failedConnects++;
@@ -418,12 +461,16 @@ final class BluetoothHidController {
                         notifyChanged();
                     }
                 });
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Bluetooth HID app registration failed", e);
+            requested = false;
+        }
         if (!requested) {
             registrationPending = false;
             Log.w(TAG, "Bluetooth HID app registration was rejected");
             // A registration left behind by an earlier instance, or one whose
             // callback was lost, rejects every new request. Clear ours and retry.
-            hid.unregisterApp();
+            unregisterSafely();
             scheduleRecovery();
         } else {
             handler.postDelayed(() -> {
@@ -444,7 +491,7 @@ final class BluetoothHidController {
             notifyChanged();
             return;
         }
-        connectionState = hid.getConnectionState(preferred);
+        connectionState = connectionStateOf(preferred);
         if (connectionState == BluetoothProfile.STATE_CONNECTED) {
             connectedHost = preferred;
             connectingSince = 0;
@@ -468,7 +515,14 @@ final class BluetoothHidController {
         }
         lastConnectRequestAt = now;
         Log.d(TAG, "Connecting preferred HID host " + safeName(preferred));
-        if (hid.connect(preferred)) {
+        boolean requested;
+        try {
+            requested = hid.connect(preferred);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Bluetooth HID connect failed", e);
+            requested = false;
+        }
+        if (requested) {
             connectionState = BluetoothProfile.STATE_CONNECTING;
             connectingSince = now;
         } else {
@@ -499,12 +553,16 @@ final class BluetoothHidController {
     private void registerBondReceiver() {
         if (bondReceiverRegistered) return;
         IntentFilter filter = new IntentFilter(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
-        if (Build.VERSION.SDK_INT >= 33) {
-            activity.registerReceiver(bondReceiver, filter, Context.RECEIVER_EXPORTED);
-        } else {
-            activity.registerReceiver(bondReceiver, filter);
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                context.registerReceiver(bondReceiver, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                context.registerReceiver(bondReceiver, filter);
+            }
+            bondReceiverRegistered = true;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not watch for new pairings", e);
         }
-        bondReceiverRegistered = true;
     }
 
     @SuppressWarnings("deprecation")
@@ -520,7 +578,7 @@ final class BluetoothHidController {
         connectingSince = 0;
         lastConnectRequestAt = 0;
         stuckConnects++;
-        hid.disconnect(host);
+        disconnectHost(host);
         connectionState = BluetoothProfile.STATE_DISCONNECTED;
         long now = SystemClock.uptimeMillis();
         if (stuckConnects >= 2 && now - lastReregisterAt >= REREGISTER_MIN_INTERVAL_MS) {
@@ -530,28 +588,62 @@ final class BluetoothHidController {
             registered = false;
             registrationPending = false;
             connectedHost = null;
+            unregisterSafely();
+        }
+    }
+
+    private int connectionStateOf(BluetoothDevice device) {
+        if (hid == null || device == null) return BluetoothProfile.STATE_DISCONNECTED;
+        try {
+            return hid.getConnectionState(device);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not read the HID connection state", e);
+            return BluetoothProfile.STATE_DISCONNECTED;
+        }
+    }
+
+    private void disconnectHost(BluetoothDevice device) {
+        if (hid == null || device == null) return;
+        try {
+            hid.disconnect(device);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not disconnect the HID host", e);
+        }
+    }
+
+    private void unregisterSafely() {
+        if (hid == null) return;
+        try {
             hid.unregisterApp();
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Could not unregister the HID app", e);
         }
     }
 
     private BluetoothDevice preferredHost() {
         if (!hasPermission() || adapter == null) return null;
-        String address = activity.getSharedPreferences("controls", Context.MODE_PRIVATE)
+        String address = context.getSharedPreferences("controls", Context.MODE_PRIVATE)
                 .getString("last_hid_host", null);
         if (address == null) return null;
         try {
             BluetoothDevice device = adapter.getRemoteDevice(address);
-            return adapter.getBondedDevices().contains(device) ? device : null;
-        } catch (IllegalArgumentException e) {
-            Log.w(TAG, "Saved Bluetooth host address is invalid", e);
+            return bondedDevices().contains(device) ? device : null;
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Saved Bluetooth host address is unusable", e);
             return null;
         }
     }
 
     private void rememberHost(BluetoothDevice device) {
         if (!hasPermission() || device == null) return;
-        activity.getSharedPreferences("controls", Context.MODE_PRIVATE).edit()
-                .putString("last_hid_host", device.getAddress()).apply();
+        String address;
+        try {
+            address = device.getAddress();
+        } catch (RuntimeException e) {
+            return;
+        }
+        context.getSharedPreferences("controls", Context.MODE_PRIVATE).edit()
+                .putString("last_hid_host", address).apply();
     }
 
     private void scheduleRecovery() {
@@ -579,22 +671,30 @@ final class BluetoothHidController {
 
     private void sendReport(BluetoothHidDevice targetHid, BluetoothDevice targetHost,
                             int id, byte[] value) {
-        if (!targetHid.sendReport(targetHost, id, value)) {
+        boolean sent;
+        try {
+            sent = targetHid.sendReport(targetHost, id, value);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Bluetooth HID report failed", e);
+            sent = false;
+        }
+        if (!sent) {
             Log.w(TAG, "Bluetooth rejected HID report " + id);
             if (targetHost.equals(connectedHost)) connectedHost = null;
             connectionState = BluetoothProfile.STATE_DISCONNECTED;
-            targetHid.disconnect(targetHost);
+            try {
+                targetHid.disconnect(targetHost);
+            } catch (RuntimeException ignored) {
+            }
             notifyChanged();
             scheduleRecovery();
         }
     }
 
-    private String compactName(BluetoothDevice device) {
-        return safeName(device).replace("DESKTOP-", "");
-    }
-
     private void notifyChanged() {
-        activity.runOnUiThread(listener::onStateChanged);
+        handler.post(() -> {
+            for (Listener listener : listeners) listener.onStateChanged();
+        });
     }
 
     private static int clamp(int value) {

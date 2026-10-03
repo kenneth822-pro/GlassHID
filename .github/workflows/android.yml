@@ -4,11 +4,17 @@ on:
   workflow_dispatch:
   push:
     branches: ["main", "claude/**"]
+    tags: ["v*"]
   pull_request:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GLASSHID_KEYSTORE_BASE64: ${{ secrets.GLASSHID_KEYSTORE_BASE64 }}
 
     steps:
       - name: Checkout source
@@ -20,16 +26,49 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test the Windows USB helper's AnkiConnect relay
+        run: python -m unittest discover -s windows -p "test_*.py" -v
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.11.1"
 
-      - name: Build debug APK
-        run: gradle :app:assembleDebug
+      - name: Unit and Robolectric tests, API-level lint, debug APK
+        run: gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+
+      - name: Signed release APK
+        if: ${{ env.GLASSHID_KEYSTORE_BASE64 != '' }}
+        env:
+          GLASSHID_KEYSTORE_PASSWORD: ${{ secrets.GLASSHID_KEYSTORE_PASSWORD }}
+          GLASSHID_KEY_ALIAS: ${{ secrets.GLASSHID_KEY_ALIAS }}
+          GLASSHID_KEY_PASSWORD: ${{ secrets.GLASSHID_KEY_PASSWORD }}
+        run: |
+          echo "$GLASSHID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          GLASSHID_KEYSTORE_FILE="$RUNNER_TEMP/release.jks" gradle :app:assembleRelease
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/lint-results-debug.html
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: GlassHID-debug
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/*/*.apk
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" app/build/outputs/apk/*/*.apk --title "GlassHID $GITHUB_REF_NAME" --generate-notes
