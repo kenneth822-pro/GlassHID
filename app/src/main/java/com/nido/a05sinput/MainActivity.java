@@ -178,6 +178,10 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         layoutSwitch = neoButton("GAMEPAD", BLUE);
         layoutSwitch.setOnClickListener(v -> showInputLayout(true, true));
         top.addView(layoutSwitch, new LinearLayout.LayoutParams(dp(78), dp(54)));
+        
+        Button ankiSwitch = neoButton("ANKI", CORAL);
+        ankiSwitch.setOnClickListener(v -> showAnkiLayout(true));
+        top.addView(ankiSwitch, new LinearLayout.LayoutParams(dp(74), dp(54)));
 
         TextView title = text("GlassHID", 18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -343,7 +347,123 @@ public class MainActivity extends Activity implements TrackpadGestureListener.Ho
         });
         return button;
     }
+private void showAnkiLayout(boolean announce) {
+    if (controllerPanel != null) controllerPanel.releaseAll();
+    controllerPanel = null;
 
+    if (normalTopBar != null) normalTopBar.setVisibility(View.VISIBLE);
+    if (controllerTopBar != null) controllerTopBar.setVisibility(View.GONE);
+
+    inputContainer.removeAllViews();
+    inputContainer.addView(buildAnkiLayout(),
+            new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.MATCH_PARENT));
+
+    if (announce) {
+        Toast.makeText(this, "Anki review layout", Toast.LENGTH_SHORT).show();
+    }
+    updateStatus();
+}
+
+private View buildAnkiLayout() {
+    LinearLayout root = new LinearLayout(this);
+    root.setOrientation(LinearLayout.VERTICAL);
+    root.setPadding(dp(8), dp(6), dp(8), dp(6));
+    root.setBackgroundColor(PAPER);
+
+    TextView title = text("ANKI REVIEW", 20);
+    title.setTypeface(Typeface.DEFAULT_BOLD);
+    title.setGravity(Gravity.CENTER);
+    title.setTextColor(INK);
+    root.addView(title, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(42)));
+
+    TextView mapping = text(
+            "FLIP = SPACE        AGAIN = 1        HARD = 2        GOOD = 3        EASY = 4",
+            11);
+    mapping.setTypeface(Typeface.DEFAULT_BOLD);
+    mapping.setGravity(Gravity.CENTER);
+    mapping.setTextColor(INK);
+    root.addView(mapping, new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(34)));
+
+    LinearLayout flipRow = keyboardRow();
+    addAnkiButton(
+            flipRow,
+            "FLIP\nSPACE",
+            1.0f,
+            YELLOW,
+            () -> sendText(" "));
+    root.addView(flipRow, rowParams());
+
+    LinearLayout ratingRow = keyboardRow();
+    addAnkiButton(
+            ratingRow,
+            "AGAIN\n1",
+            1.0f,
+            CORAL,
+            () -> sendText("1"));
+    addAnkiButton(
+            ratingRow,
+            "HARD\n2",
+            1.0f,
+            PAPER,
+            () -> sendText("2"));
+    addAnkiButton(
+            ratingRow,
+            "GOOD\n3",
+            1.0f,
+            GREEN,
+            () -> sendText("3"));
+    addAnkiButton(
+            ratingRow,
+            "EASY\n4",
+            1.0f,
+            BLUE,
+            () -> sendText("4"));
+    root.addView(ratingRow, rowParams());
+
+    LinearLayout bottomRow = keyboardRow();
+
+    addAnkiButton(
+            bottomRow,
+            "KEYBOARD",
+            1.0f,
+            PAPER,
+            () -> showInputLayout(false, true));
+
+    addAnkiButton(
+            bottomRow,
+            "GAMEPAD",
+            1.0f,
+            BLUE,
+            () -> showInputLayout(true, true));
+
+    root.addView(bottomRow, rowParams());
+
+    return root;
+}
+
+private void addAnkiButton(
+        LinearLayout row,
+        String label,
+        float weight,
+        int color,
+        Runnable action) {
+
+    Button button = neoButton(label, color);
+
+    button.setTextSize(16);
+    button.setTypeface(Typeface.DEFAULT_BOLD);
+
+    button.setOnClickListener(v -> {
+        feedback.perform(v, HapticFeedbackConstants.KEYBOARD_TAP);
+        action.run();
+    });
+
+    row.addView(button, keyParams(weight));
+}
     private void showTrackpadPopup(View anchor) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
